@@ -94,7 +94,8 @@ class Watcher:
         self.numbers: dict[str, int] = {}
         self.arm_masks: deque = deque(maxlen=LAG_LOOKS)
         self.edge: list[dict] = []  # things across the edge of the searched area, and for how many looks each has lain still
-        self.news: list[tuple[str, bool]] = []  # what moved in this look that the arm did not move, and whether one look is proof
+        self.news: list[tuple[str, bool, list]] = []  # what moved in this look that the arm did not move, whether one look is proof, and the pixel
+        self.by_arm = None  # the part of the picture where what happens is the arm's own doing
         self.news_looks = 0
         self.news_t = 0.0
         self.said_t = 0.0
@@ -124,6 +125,10 @@ class Watcher:
             hide |= disc > 0
         blobs, area, covered = self.find.table_blobs(self.ctx, self.cam, img, {"table_z": self.table_z, "joints_rad": q}, hide)
         near = cv2.dilate(covered.astype(np.uint8), np.ones((15, 15), np.uint8)) > 0  # the arm and a little around it
+        # Wider than that, around the arm and what it holds, nothing counts as news: there the
+        # arm's own plates and cables come out from behind the mask, the object in the jaws
+        # shows, and outlines change because the arm is passing them.
+        self.by_arm = cv2.dilate(covered.astype(np.uint8), np.ones((61, 61), np.uint8)) > 0
         # The edge of the searched area that a hand can come in over: the left, right and camera
         # sides. Not the robot's side: everything tall leans that way in this view, so the top of
         # an object standing near that edge crosses it.
@@ -163,24 +168,29 @@ class Watcher:
             cx, cy = blob.centroid
             same = next((e for e in self.edge if abs(e["cx"] - cx) < 8 and abs(e["cy"] - cy) < 8 and 0.75 < blob.area / e["area"] < 1.33), None)
             if same is None:
-                self.news.append(("something is moving at the edge of the work area", blob.area >= LARGE_PX))
+                self._tell("something is moving at the edge of the work area", blob.area >= LARGE_PX, cx, cy)
                 self.edge.append({"cx": cx, "cy": cy, "area": blob.area, "box": list(blob.box), "looks": 1, "unseen": 0})
             else:
                 same.update(looks=same["looks"] + 1, unseen=0)
         # what has lain there for a second is remembered while the arm passes in front of it; what only passed through, for three seconds
         self.edge = [e for e in self.edge if e["unseen"] < (600 if e["looks"] >= 10 else 30)]
 
+    def _tell(self, what: str, proof: bool, u: float, v: float) -> None:
+        u, v = int(round(u)), int(round(v))
+        if not self.by_arm[min(max(v, 0), self.by_arm.shape[0] - 1), min(max(u, 0), self.by_arm.shape[1] - 1)]:
+            self.news.append((what, proof, [u, v]))
+
     def _intrusion(self, state, now, stop_on_intrusion) -> None:
         self.news_looks = self.news_looks + 1 if self.news else 0
-        if self.news and (self.news_looks >= NEWS_LOOKS or any(proof for _, proof in self.news)):
+        if self.news and (self.news_looks >= NEWS_LOOKS or any(proof for _, proof, _ in self.news)):
             self.news_t = now
-            what = next((text for text, proof in self.news if proof), self.news[0][0])
+            what, _, pixel = next((n for n in self.news if n[1]), self.news[0])
             if self.intrusion is None:
                 self.intrusion = {"since": round(now, 2)}
                 if now - self.said_t > 5.0:  # the timeline is for people: not a line for every twitch of a hand
                     self.said_t = now
                     self.arm.emit("log", level="warn", text=f"work area: {what}")
-            self.intrusion["what"] = what
+            self.intrusion.update(what=what, pixel=pixel)
         elif self.intrusion and now - self.news_t > QUIET_S:
             self.intrusion, self.clear_since = None, now
         if self.intrusion and stop_on_intrusion and state["busy"]:
@@ -209,7 +219,7 @@ class Watcher:
             self._name(t, d["color"])
         if elsewhere or (t["recent"] and _px(d, t) > MOVED):
             if t.get("state") == "visible" and now - t["seen_t"] < 0.35:  # it was in plain view a look ago: nothing hid it, something moved it
-                self.news.append((f"{t['id']} is being moved", True))
+                self._tell(f"{t['id']} is being moved", True, d["u"], d["v"])
             t["recent"].clear()
             t["moved_t"] = now
             t["moves"] += 1
@@ -270,7 +280,7 @@ class Watcher:
         for j, d in enumerate(seen):
             if j in taken_d or d["cut"]:
                 continue
-            self.news.append(("something new is on the table", False))
+            self._tell("something new is on the table", False, d["u"], d["v"])
             before = next((m for m in self.maybe if _px(m, d) < SAME_SPOT), None)
             d["looks"] = (before["looks"] if before else 0) + 1
             if d["looks"] < CONFIRM:
@@ -335,7 +345,9 @@ class Watcher:
                   "polygon": t["polygon"] if t["state"] == "visible" and not t["on"] else None} for t in self.tracks]  # fmt: skip
         marks += [{"label": "at the edge: not tracked" if e["looks"] >= 10 else "", "box": e["box"], "bgr": (0, 160, 255) if e["looks"] >= 10 else (0, 0, 255)} for e in self.edge if not e["unseen"]]
         if self.intrusion:
-            vision._label(img := img.copy(), f"INTRUSION: {self.intrusion['what']}", (8, 20), scale=0.55, color=(0, 0, 255))
+            img = img.copy()
+            vision._label(img, f"INTRUSION: {self.intrusion['what']}", (8, 20), scale=0.55, color=(0, 0, 255))
+            cv2.circle(img, tuple(self.intrusion["pixel"]), 22, (0, 0, 255), 2, cv2.LINE_AA)
         return vision.draw_marks(img, marks)
 
     def show(self, report: dict) -> None:
@@ -370,7 +382,7 @@ def main() -> None:
     stop_on_intrusion = "--no-stop" not in sys.argv
     FILE.parent.mkdir(parents=True, exist_ok=True)
     arm = Arm(source="tracker")
-    watcher, failing_since, n = None, None, 0
+    watcher, failing_since, n, since = None, None, 0, None
     try:
         while True:
             t0 = time.time()
@@ -389,6 +401,10 @@ def main() -> None:
             if picture is not None and n % 5 == 0:
                 _write(FILE.with_suffix(".jpg"), cv2.imencode(".jpg", picture, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes())
                 watcher.show(report)
+            if picture is not None and report["intrusion"] and report["intrusion"]["since"] != since:
+                # what it saw when it last raised the alarm, kept for whoever asks why the arm stopped
+                since = report["intrusion"]["since"]
+                _write(FILE.with_name("intrusion.jpg"), cv2.imencode(".jpg", picture, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes())
             time.sleep(max(0.0, PERIOD - (time.time() - t0)))
     finally:
         FILE.unlink(missing_ok=True)  # no file means no tracker: a stale one would be read as the truth

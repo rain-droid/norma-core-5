@@ -11,7 +11,7 @@ What this adds:
 * if the tracker stops the arm because something moved on the table (a hand, most likely), it
   waits for quiet and carries on;
 * afterwards it waits for the top camera to see the object again (sending the arm home if the
-  arm is in the way) and compares. On the table, it must lie within 25 mm of x, y. On another
+  arm is in the way) and compares. On the table, it must lie within 40 mm of x, y. On another
   object, it must not be lying anywhere else, and the pile must look bigger than what was
   underneath did alone;
 * if that check fails and the object is in view, it is picked up and placed again, `retries`
@@ -36,7 +36,7 @@ from util import tracker
 from util.arm import RobotError
 from util.motion import require_ready, tcp_report
 
-NEAR_ENOUGH = 0.025  # metres from x, y that still counts as placed there
+NEAR_ENOUGH = 0.04  # metres from x, y that still counts as placed there: the arm puts down to within 1-3 cm, and the camera measures to about 1
 
 
 def settle(ctx, name: str) -> tuple[dict, dict]:
@@ -126,7 +126,10 @@ def place_object(ctx, object: str = "", on: str = "", x: float | None = None, y:
     if good:
         return {**out, "checked": True, "landed_at": [t["x"], t["y"]], "off_target_mm": round(off * 1000), "state": tcp_report(arm.state()["ee"], arm.state()["gripper"])}
     if retries > 0 and t["state"] == "visible" and t["on"] is None:
-        again = ctx.call(pick_object, object=mine)
+        try:
+            again = ctx.call(pick_object, object=mine)
+        except RobotError as e:
+            raise RobotError(f"{problem}. It was put down; picking it up to place it again failed: {e}") from None
         more = ctx.call(place_object, on=on, x=x, y=y, z=z, yaw_deg=yaw_deg, attempts=attempts, retries=retries - 1)
         return {**more, "tried": [*tried, problem + ": picked it up and placed it again", *again["tried"], *more["tried"]]}
     raise RobotError(problem)

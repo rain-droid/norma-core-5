@@ -17,7 +17,9 @@ coming in over the edge of the work area, something new appearing, a tracked obj
 From this camera that is what a hand looks like. `clear_s` says how long the table has been
 quiet. While it is not quiet the tracker stops any motion of the arm; pick_object and
 place_object wait and carry on, other tools return a "stopped" error. A thing lying still is
-never an intrusion: a motionless hand is not seen as one.
+never an intrusion: a motionless hand is not seen as one. Nor is anything within a few
+centimetres of the arm, where its own parts and what it holds move. To see what set it off
+last, open perception/exteroception/intrusion.jpg: the spot is circled.
 `stop_arm_on_intrusion: false` restarts the tracker without the stopping, for when it stops
 the arm for no reason; say so to whoever is standing nearby. It stays off until set to true.
 
