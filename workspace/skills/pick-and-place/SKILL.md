@@ -7,9 +7,10 @@ description: Pick up an object from the table and put it down somewhere else, or
    `track_objects`. Open `image` and decide which name is the object you want from what you
    see, not from the colour word alone. Check that its cross sits in the middle of where the
    object stands.
-2. `pick_object` with that name. It waits for hands to leave, aims at where the object is at
-   that moment, aims again if it moves, and tries again if the jaws come up empty. Read
-   `tried`: it says what happened on the way.
+2. `pick_object` with that name. It waits for unexplained motion to stop, aims at where the
+   object is at that moment, aims again if it moves, and tries again if the jaws come up empty.
+   It does not establish that hands have left: a stationary or occluded hand can be missed.
+   Keep people clear while it runs. Read `tried`: it says what happened on the way.
 3. `place_object` with `on` (the name of the object to stack on) or `x`, `y`. It checks with
    the camera afterwards and, if the object is not where it should be, picks it up and places
    it once more. `checked: true` means the camera agreed.
@@ -32,9 +33,10 @@ the table's own colour and black things on the dark mat are not seen):
 What the errors mean:
 
 - "gave up after 20 s: the work area is not quiet (...)": something keeps moving on the table:
-  a hand, or an object the tracker measures unsteadily. Open the image from `track_objects`.
-  If nobody is there, the tracker is wrong: `track_objects` with
-  `stop_arm_on_intrusion: false`, and say so.
+  a hand, or an object the tracker measures unsteadily. Open the current image and the last
+  alarm's `perception/exteroception/intrusion.jpg` and `intrusion.json`. Do not turn stopping
+  off automatically. Only use `stop_arm_on_intrusion: false` after an operator has inspected
+  the scene and agreed to supervise without it; explicitly re-enable it afterwards.
 - "... is out of sight (hidden)": it is under the arm even at home, or under something else.
   Objects right in front of the base are hidden by the arm in the home pose.
 - "... is out of sight (missing)": it was taken away, or pushed out of the searched area.

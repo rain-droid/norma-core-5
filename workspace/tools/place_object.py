@@ -126,7 +126,10 @@ def place_object(ctx, object: str = "", on: str = "", x: float | None = None, y:
     if good:
         return {**out, "checked": True, "landed_at": [t["x"], t["y"]], "off_target_mm": round(off * 1000), "state": tcp_report(arm.state()["ee"], arm.state()["gripper"])}
     if retries > 0 and t["state"] == "visible" and t["on"] is None:
-        again = ctx.call(pick_object, object=mine)
+        try:
+            again = ctx.call(pick_object, object=mine)
+        except RobotError as e:
+            raise RobotError(f"{problem}. It was put down; picking it up to place it again failed: {e}") from None
         more = ctx.call(place_object, on=on, x=x, y=y, z=z, yaw_deg=yaw_deg, attempts=attempts, retries=retries - 1)
         return {**more, "tried": [*tried, problem + ": picked it up and placed it again", *again["tried"], *more["tried"]]}
     raise RobotError(problem)

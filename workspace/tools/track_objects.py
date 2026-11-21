@@ -17,9 +17,14 @@ coming in over the edge of the work area, something new appearing, a tracked obj
 From this camera that is what a hand looks like. `clear_s` says how long the table has been
 quiet. While it is not quiet the tracker stops any motion of the arm; pick_object and
 place_object wait and carry on, other tools return a "stopped" error. A thing lying still is
-never an intrusion: a motionless hand is not seen as one.
-`stop_arm_on_intrusion: false` restarts the tracker without the stopping, for when it stops
-the arm for no reason; say so to whoever is standing nearby. It stays off until set to true.
+never an intrusion: a motionless hand is not seen as one. This is not a person detector or
+safety interlock; keep people out of the arm's reach while it runs.
+For the last alarm, open perception/exteroception/intrusion.jpg (trigger circled) and
+intrusion.json beside it (the report at that moment). These are historical evidence, not
+the current scene; use tracks.jpg and tracks.json for that.
+`stop_arm_on_intrusion: false` restarts the tracker without the stopping. Only do this after
+an operator has checked the scene and agreed to supervise without it; do not disable it
+automatically to get past repeated stops. It stays off until explicitly set to true.
 
 `at_edge` lists things lying across the edge of the searched area. They cannot be measured
 there or picked by name: move them in, or use capture_camera and pixel_to_table.

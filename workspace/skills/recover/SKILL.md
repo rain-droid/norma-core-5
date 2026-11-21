@@ -6,12 +6,13 @@ description: What to do when a command is refused, the arm is blocked, a servo f
 Read the error first: each one is written to be acted on. Then, by what it says:
 
 - **busy**: another motion is running. Wait for it, or `stop` it.
-- **stopped**: someone pressed stop, or the tracker stopped the arm because something large
-  came into the work area (then `intrusion` or `stopped_arm_t` in
-  `perception/exteroception/tracks.json` says so). Do not carry on where you were. Look
-  (`track_objects`, `capture_camera`), find out why, and start again from what you see.
-  `pick_object` and `place_object` wait out a stop by the tracker themselves; the other tools
-  return this error.
+- **stopped**: someone pressed stop, or the tracker detected unexplained motion.
+  `perception/exteroception/intrusion.jpg` circles the last alarm's trigger;
+  `intrusion.json` beside it records the report at that moment. These are historical:
+  inspect the current scene with `track_objects` and `capture_camera` before deciding.
+  `pick_object` and `place_object` wait out a tracker stop automatically, but quiet is not
+  proof that people have left: stationary and occluded hands can be missed. Keep people
+  clear of the arm. The other tools return this error rather than resuming.
 - **blocked: joint N is X deg behind**: the arm met something, or the move was too heavy or
   too fast. It is holding where it stopped. Look with the top camera and
   `read_proprioception`. If something is in the way, go back the way you came, slowly. If

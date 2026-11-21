@@ -114,6 +114,26 @@ def test_top_camera_measures_at_a_height(robot):
     assert np.allclose(eye, cal["camera_mat"], atol=1e-4)
 
 
+def test_maroon_ring_is_red_across_the_hue_wrap(robot):
+    import cv2
+    from find_objects import color_name
+    from util.vision import blobs_from_mask
+
+    # Dark table visible through the hole, red hues on both sides of HSV's wrap.
+    # A linear hue median calls this blue; the saturated ring must decide its colour.
+    y, x = np.indices((80, 80))
+    radius2 = (x - 39.5) ** 2 + (y - 39.5) ** 2
+    ring = (radius2 < 30**2) & (radius2 > 16**2)
+    hsv = np.full((80, 80, 3), (105, 65, 70), dtype=np.uint8)
+    hsv[ring] = (1, 210, 95)
+    hsv[ring & (x >= 40)] = (179, 210, 95)
+    blob = blobs_from_mask(ring.astype(np.uint8) * 255, 120)[0]
+    assert color_name(cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR), blob) == "red"
+
+    hsv[ring] = (110, 210, 95)
+    assert color_name(cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR), blob) == "blue"
+
+
 def test_workspace_plans_with_the_model_the_robot_side_checks_against():
     """The workspace carries its own copy of the robot model. If the two drifted apart, plans made
     here would be judged against a different arm."""
