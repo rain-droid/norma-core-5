@@ -561,16 +561,19 @@ class Robot:
 
     async def _gripper_wait(self, timeout: float = 2.5) -> float:
         """Wait for the jaws to stop moving; returns the achieved opening (0..1)."""
-        m = self.link.motors
+        # StationLink replaces link.motors on every state update, so look the servo up each time
+        tick_now = lambda: self.link.motors[GRIPPER_ID].tick  # noqa: E731
         t0 = time.monotonic()
-        last_tick = m[GRIPPER_ID].tick
+        last_tick = tick_now()
         still_since = None
-        await asyncio.sleep(0.12)
+        # the real servo starts moving ~0.3 s after the command; don't mistake that for a stall
+        while abs(tick_now() - last_tick) <= 2 and time.monotonic() - t0 < 0.6:
+            await asyncio.sleep(0.02)
         while time.monotonic() - t0 < timeout:
             if self._stop_evt.is_set():
                 raise Stopped("stopped")
             await asyncio.sleep(0.04)
-            tick = m[GRIPPER_ID].tick
+            tick = tick_now()
             if abs(tick - last_tick) <= 2:
                 still_since = still_since or time.monotonic()
                 if time.monotonic() - still_since > 0.2:

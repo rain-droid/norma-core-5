@@ -17,6 +17,8 @@ drivers:
     formats:
       - format: "1280x720@30fps,420v"
       - format: "640x480@30fps,420v"
+      # Linux: the same cameras expose only MJPG
+      - format: "640x480@30fps,mjpg"
     # keep 1 of every 2 frames (~15 fps) to limit disk churn in the frame queue
     frame-skip: 1
 inference:
