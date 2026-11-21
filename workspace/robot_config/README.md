@@ -50,7 +50,7 @@ servo especially): trust a value only if it stays; it should stay under about 55
 
 Overload protection: a servo whose output stays above its threshold for 2 s drops to 20 % torque
 and reports status 32 until its torque is switched off and on, and the joint sags meanwhile. The
-threshold is stored in each servo. It is 50 % on the arm joints (`../scripts/servo_overload.py`
+threshold is stored in each servo. It is 60 % on the arm joints (`../scripts/servo_overload.py`
 shows and sets it); the Station's calibration puts it back to 25 %, which the shoulder exceeds
 on most lifts. Holding the arm stretched out keeps the shoulder near 35-45 %: go `home` or
 `rest` between tasks. A tool refuses to start while any servo reports a fault.
