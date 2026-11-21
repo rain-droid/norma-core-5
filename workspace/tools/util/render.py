@@ -124,14 +124,23 @@ class Model:
             links[j["child"]] = T @ M
         return links, frames
 
-    def triangles(self, values: dict[str, float], highlight: str | None = None) -> tuple[np.ndarray, np.ndarray]:
+    def moved_by(self, joint: str) -> set[str]:
+        """The links a joint carries: its own and every one further out."""
+        links = {next(j["child"] for j in self.joints if j["name"] == joint)}
+        while True:
+            more = {j["child"] for j in self.joints if j["parent"] in links} - links
+            if not more:
+                return links
+            links |= more
+
+    def triangles(self, values: dict[str, float], highlight: set[str] = frozenset()) -> tuple[np.ndarray, np.ndarray]:
         """All mesh triangles in the base frame, with a base colour each."""
         links, _ = self.poses(values)
         tris, colors = [], []
         for name, mesh in self.meshes.items():
             T = links[name]
             tris.append(mesh @ T[:3, :3].T + T[:3, 3])
-            color = HIGHLIGHT if name == highlight else (SERVO if name.startswith("ST3215") else BRACKET)
+            color = HIGHLIGHT if name in highlight else (SERVO if name.startswith("ST3215") else BRACKET)
             colors.append(np.tile(color, (len(mesh), 1)))
         return np.concatenate(tris), np.concatenate(colors)
 

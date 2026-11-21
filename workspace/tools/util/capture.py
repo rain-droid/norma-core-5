@@ -24,7 +24,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from elrobot import vision
+from util import vision
 from util.arm import RobotError
 
 

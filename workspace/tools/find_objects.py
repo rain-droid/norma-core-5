@@ -39,8 +39,7 @@ import math
 import cv2
 import numpy as np
 
-from elrobot import vision
-from util import capture
+from util import capture, vision
 
 # The part of the table that is searched from the top camera, metres in the base frame.
 SEARCH_X = (-0.24, 0.24)

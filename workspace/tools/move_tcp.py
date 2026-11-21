@@ -19,7 +19,7 @@ Returns where the tool measurably ended up and how far that is from the target.
 
 import numpy as np
 
-from elrobot.kinematics import approach_from_pitch
+from util.kinematics import approach_from_pitch
 from util.arm import RobotError
 from util.motion import require_ready, tcp_report
 

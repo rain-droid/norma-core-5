@@ -22,7 +22,7 @@ TABLE_Z = 0.010  # not zero, so a tool that forgets the table height shows
 @pytest.fixture(scope="module")
 def robot(tmp_path_factory):
     root = tmp_path_factory.mktemp("agent") / "workspace"
-    shutil.copytree(REPO_ROOT / "workspace", root, ignore=shutil.ignore_patterns("perception", "tool_call_history", "__pycache__", "assets", "*.sim.json"))
+    shutil.copytree(REPO_ROOT / "workspace", root, ignore=shutil.ignore_patterns("perception", "tool_call_history", "__pycache__", "assets", "*.sim.json", ".*"))
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -110,3 +110,9 @@ def test_top_camera_measures_at_a_height(robot):
     cal = world.calibration()
     _, eye = camera_from_homography(cal["H_mat_px"], cal["image_size"])
     assert np.allclose(eye, cal["camera_mat"], atol=1e-4)
+
+
+def test_workspace_plans_with_the_model_the_robot_side_checks_against():
+    """The workspace carries its own copy of the robot model. If the two drifted apart, plans made
+    here would be judged against a different arm."""
+    assert (REPO_ROOT / "workspace/robot_config/model.urdf").read_bytes() == Config().urdf.read_bytes()

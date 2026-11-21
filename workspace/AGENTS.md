@@ -12,14 +12,18 @@ around it and send joint angles yourself.
 
 | Path | What it is |
 |---|---|
-| `robot_config/` | The body: URDF, joint table, frames, camera calibration, and `control.py`, the raw joint interface. Read `robot_config/README.md` first. |
-| `tools/` | One Python file per tool: its whole algorithm and its own command. `tools/util/` is the shared code: `arm.py` is the contract with the robot, `planning.py` the IK. |
+| `robot_config/` | The body: URDF and meshes, a picture of what each joint does (`visuals/`), frames, camera calibration, and `control.py`, the raw joint interface. Read `robot_config/README.md` first. |
+| `tools/` | One Python file per tool: its whole algorithm and its own command. `tools/util/` is the shared code: `arm.py` is the contract with the robot, `planning.py` and `kinematics.py` the IK. |
 | `perception/` | The live senses, rewritten twice a second and after every command: `latest.json`, `exteroception/{top,wrist}/rgb.jpg`, `proprioception/state.json`. |
-| `skills/` | Task procedures in Markdown. Read the one that fits before starting. |
+| `skills/` | Task procedures in Markdown, written from experience with this arm. Take up the one that fits before starting (`activate_skill`). |
 | `tool_call_history/` | One folder per call: `input.json`, `result.json`, `joint_commands.jsonl` (every command sent), images. |
 
 `perception/proprioception/state.json` says whether this is the real arm or a simulation
 (`"mode": "real"` or `"sim"`). Work the same way in both.
+
+Nothing here reaches outside this directory except the joint commands: it has its own
+interpreter and libraries (`pyproject.toml`), its own copy of the robot model and its own
+kinematics. The robot is a separate process that it talks to over local HTTP.
 
 ## Running tools
 
@@ -42,10 +46,11 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Gripper | `open_gripper`, `close_gripper` | jaws only |
 | Whole manipulations | `pick_at`, `place_at` | yes |
 | Poses and safety | `home`, `rest`, `stop` | `stop` always works |
+| Skills | `activate_skill`, `deactivate_skill` | no |
 
-A session usually goes: `home` (wakes the arm and gets it out of the camera's way),
-`find_objects` and open its image, act, look again to confirm, and `rest` when you are done
-or waiting. Do not leave the arm stretched out: holding that is hard on the shoulder servo.
+A session usually goes: `activate_skill` for the task, `home` (wakes the arm and gets it out
+of the camera's way), `find_objects` and open its image, act, look again to confirm, and
+`rest` when you are done or waiting. Do not leave the arm stretched out: holding that is hard on the shoulder servo.
 
 ## The tools are a ladder, not a fence
 
