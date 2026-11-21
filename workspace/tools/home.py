@@ -12,7 +12,7 @@ from elrobot.robot import RobotError
 from util.motion import READY_DEG, require_ready, tcp_report
 
 
-async def home(ctx, speed: float = 0.8) -> dict:
+async def home(ctx, speed: float = 0.5) -> dict:
     robot = ctx.robot
     require_ready(ctx)
     tcp = robot.tcp()[:3, 3]

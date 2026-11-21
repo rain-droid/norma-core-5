@@ -15,7 +15,8 @@ Steps, each of which you can also do yourself with the tool named:
 `yaw` rotates the jaws about the vertical, degrees; 0 closes left-right. Pass the `yaw_deg`
 find_objects reported so the jaws close across the narrow side. The jaws open 53 mm.
 `grasp_height` is where the tool point ends up above the table: about half the object's height,
-never less than 0.012.
+never less than 0.012. Beyond about 27 cm the gripper has to lean, and leaning jaws that are
+also turned (`yaw` not 0) dip one fingertip towards the table: such a grasp needs 0.020 or more.
 
 Errors say which step failed. "closed on nothing" means the jaws shut completely at the grasp
 point: the object is not where x, y says, so look again before retrying. A success here means

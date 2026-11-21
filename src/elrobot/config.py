@@ -40,8 +40,10 @@ class Config:
 
     # --- motion
     control_hz: float = 50.0
-    max_joint_speed: float = 1.2  # rad/s at speed=1.0
-    max_joint_accel: float = 5.0  # rad/s^2
+    # Cruise speed and ramp acceleration of the trapezoidal profile at speed=1.0. Chosen so moves
+    # take as long as they did under the minimum-jerk profile these replaced (1.2 and 5.0 there).
+    max_joint_speed: float = 0.96  # rad/s
+    max_joint_accel: float = 3.9  # rad/s^2
     limit_margin: float = 0.06  # rad kept clear of each joint limit
     # Torque limit (0..1000) written to the arm servos when torque comes on. The Station's
     # calibration leaves it at 500, which on a 7.5 V supply is too weak to hold the arm out.

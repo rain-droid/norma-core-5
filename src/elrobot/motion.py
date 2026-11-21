@@ -1,4 +1,4 @@
-"""Joint-space trajectories with smooth (minimum-jerk) time scaling."""
+"""Joint-space trajectories with a trapezoidal speed profile."""
 
 from __future__ import annotations
 
@@ -8,20 +8,17 @@ from dataclasses import dataclass
 import numpy as np
 
 
-def min_jerk(tau: float) -> float:
-    """Position fraction for normalised time tau in [0, 1]: zero velocity and acceleration at both ends."""
-    tau = min(1.0, max(0.0, tau))
-    return tau * tau * tau * (10.0 - 15.0 * tau + 6.0 * tau * tau)
-
-
-# Peak velocity and acceleration of the min-jerk profile for unit distance in unit time.
-_PEAK_VEL = 1.875
-_PEAK_ACC = 5.7735
-
-
 @dataclass
 class Trajectory:
-    """A path through joint waypoints, traversed with one min-jerk profile over its whole length."""
+    """A path through joint waypoints, traversed with one trapezoidal speed profile over its
+    whole length: a third of the time accelerating, a third cruising, a third decelerating.
+
+    The duration is the shortest that keeps the cruise speed (1.5 L/T) and the acceleration
+    (4.5 L/T^2) within the limits. The servos follow a moving setpoint with a lag that grows with
+    speed, and the arm is declared blocked when that lag stays large, so what matters is how fast
+    the profile ever goes: for the same move time this peaks 20 % lower than a minimum-jerk
+    profile does.
+    """
 
     waypoints: np.ndarray  # (N, dof), N >= 2
     duration: float
@@ -35,11 +32,7 @@ class Trajectory:
         seg = np.max(np.abs(np.diff(W, axis=0)), axis=1)
         cum = np.concatenate([[0.0], np.cumsum(seg)])
         length = float(cum[-1])
-        duration = max(
-            min_duration,
-            _PEAK_VEL * length / max_speed,
-            math.sqrt(_PEAK_ACC * length / max_accel),
-        )
+        duration = max(min_duration, 1.5 * length / max_speed, math.sqrt(4.5 * length / max_accel))
         return cls(waypoints=W, duration=duration, _cum=cum)
 
     @property
@@ -57,7 +50,15 @@ class Trajectory:
     def sample(self, t: float) -> np.ndarray:
         if self.length <= 1e-9:
             return self.waypoints[-1].copy()
-        s = min_jerk(t / self.duration) * self.length
+        T, r = self.duration, self.duration / 3
+        t = min(T, max(0.0, t))
+        v = self.length / (T - r)  # cruise speed
+        if t < r:
+            s = 0.5 * v / r * t * t
+        elif t <= T - r:
+            s = v * (t - 0.5 * r)
+        else:
+            s = self.length - 0.5 * v / r * (T - t) ** 2
         i = int(np.searchsorted(self._cum, s, side="right")) - 1
         i = min(max(i, 0), len(self.waypoints) - 2)
         span = self._cum[i + 1] - self._cum[i]

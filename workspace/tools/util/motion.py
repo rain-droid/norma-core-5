@@ -49,17 +49,25 @@ def approach_for(ctx, target: np.ndarray, grasp_z: float, yaw: float | None, hov
     r = ctx.robot
     grasp = np.array([target[0], target[1], ctx.cfg.table_z + grasp_z])
     last = None
+    blocked: list[str] = []  # what the clearance check said about each pose IK reached but may not use
+
+    def clear(q, allow_low: bool) -> bool:
+        why = r.check_config(q, allow_low=allow_low)
+        if why:
+            blocked.append(why)
+        return why is None
+
     for pitch in (90, 80, 70, 60, 50, 40, 30):
         a = approach_from_pitch(grasp[:2], pitch)
         jaw = jaw_from_yaw(a, yaw if yaw is not None else 0.0)
         hover_pos = grasp - a * hover
         rg = r.kin.ik(grasp, approach=a, jaw=jaw, q_seed=np.radians(READY_DEG), limit_margin=ctx.cfg.limit_margin,
-                      accept=lambda q: r.check_config(q, allow_low=True) is None)  # fmt: skip
+                      accept=lambda q: clear(q, True))  # fmt: skip
         if not rg.ok:
             last = rg
             continue
         rh = r.kin.ik(hover_pos, approach=a, jaw=jaw, q_seed=rg.q, limit_margin=ctx.cfg.limit_margin,
-                      accept=lambda q: r.check_config(q) is None)  # fmt: skip
+                      accept=lambda q: clear(q, False))  # fmt: skip
         if rh.ok:
             return a, float(pitch), rh.q, hover_pos, grasp
         last = rh
@@ -68,6 +76,10 @@ def approach_for(ctx, target: np.ndarray, grasp_z: float, yaw: float | None, hov
         why = f"it is {d * 100:.0f} cm from the base (reach is about 38 cm on the table)"
     elif d < 0.09:
         why = "it is too close to the base"
+    elif blocked and last is not None and "rejected" in last.reason:
+        # reachable, but not allowed: say why, most often a fingertip of tilted, turned jaws
+        # dipping below the table, which a higher grasp or yaw 0 avoids
+        why = f"every pose that gets there was refused, most recently: {blocked[-1]}. Try a larger grasp height, or yaw 0"
     else:
         why = last.describe() if last else "no approach found"
     raise RobotError(f"can't reach a grasp at x={target[0]:+.3f} y={target[1]:+.3f}: {why}")

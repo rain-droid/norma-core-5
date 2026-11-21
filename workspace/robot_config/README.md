@@ -45,4 +45,20 @@ into positions.
 
 ST3215 bus servos behind the NormaCore Station. They are position-controlled with a soft gain,
 so a loaded joint sags a few degrees; the daemon trims that out at the end of every move.
-`load` in state.json is in 0.1 % of stall torque, `temp_c` should stay under about 55.
+`load` in state.json is in 0.1 % of full output. Single `temp_c` readings glitch (the gripper
+servo especially): trust a value only if it stays; it should stay under about 55.
+
+Overload protection: a servo whose output stays above its threshold for 2 s drops to 20 % torque
+and reports status 32 until its torque is switched off and on, and the joint sags meanwhile. The
+threshold is stored in each servo. It is 50 % on the arm joints (`../scripts/servo_overload.py`
+shows and sets it); the Station's calibration puts it back to 25 %, which the shoulder exceeds
+on most lifts. Holding the arm stretched out keeps the shoulder near 35-45 %: go `home` or
+`rest` between tasks. A tool refuses to start while any servo reports a fault.
+
+Moves follow a trapezoidal speed profile. The servos trail a moving setpoint, more the faster it
+moves, and a joint more than 12.6 degrees behind for half a second counts as blocked. Unfolding
+from the resting pose is the heaviest move: at speed 0.5 the upper elbow trails by about 9.5
+degrees, which is why `home` defaults to that speed. Faster has been refused as blocked.
+
+Inverse kinematics is pink (Pinocchio): `../src/elrobot/kinematics.py`, `ik` for a pose and
+`ik_line` for straight lines.

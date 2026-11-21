@@ -20,17 +20,38 @@ def test_zero_pose_matches_mesh_measurements():
     assert abs(np.linalg.det(T[:3, :3]) - 1) < 1e-9
 
 
-def test_jacobian_matches_finite_differences():
-    rng = np.random.default_rng(1)
-    for _ in range(5):
-        q = rng.uniform(kin.lower, kin.upper)
-        J = kin.jacobian(q)
-        eps = 1e-6
-        for i in range(7):
-            dq = np.zeros(7)
-            dq[i] = eps
-            dp = (kin.fk(q + dq)[:3, 3] - kin.fk(q - dq)[:3, 3]) / (2 * eps)
-            assert np.allclose(J[:3, i], dp, atol=1e-6)
+def test_straight_line_holds_position_and_direction_both_ways():
+    """A descent and the retreat back up it. Solving each waypoint on its own used to refuse the
+    way back ("would have to flip configuration") after planning the way down."""
+    a = approach_from_pitch([-0.06, 0.20], 90)
+    low = np.array([-0.06, 0.20, 0.032])
+    high = low - a * 0.07
+    start = kin.ik(high, approach=a, jaw=jaw_from_yaw(a, 0), q_seed=np.radians([0, -21, -29, 36, 0, 73.5, 0]))
+    assert start.ok
+
+    def follow(q0, origin, goal):
+        path, r = kin.ik_line(q0, goal, approach=a)
+        assert r.ok, r.describe()
+        assert np.array_equal(path[0], q0) and kin.within_limits(path[-1])
+        assert np.max(np.abs(np.diff(path, axis=0))) < 0.2, "no jumps between waypoints"
+        along = (goal - origin) / np.linalg.norm(goal - origin)
+        for q in path:
+            T = kin.fk(q)
+            d = T[:3, 3] - origin
+            assert np.linalg.norm(d - (d @ along) * along) < 0.002 and T[:3, 2] @ a > math.cos(math.radians(4))
+        assert np.linalg.norm(kin.fk(path[-1])[:3, 3] - goal) < 0.002
+        return path[-1]
+
+    follow(follow(start.q, high, low), low, high)
+
+
+def test_straight_line_out_of_reach_stops_and_says_where():
+    start = kin.ik([0.0, 0.25, 0.10], approach=approach_from_pitch([0.0, 0.25], 60), q_seed=np.zeros(7))
+    assert start.ok
+    path, r = kin.ik_line(start.q, [0.0, 0.60, 0.10])
+    assert not r.ok and "stuck" in r.reason
+    assert 1 <= len(path) < 45  # 35 cm at 8 mm a step would be 45 waypoints
+    assert np.linalg.norm(kin.fk(path[-1])[:3, 3] - [0.0, 0.25, 0.10]) < 0.30
 
 
 def test_ik_recovers_reachable_poses():

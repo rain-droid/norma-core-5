@@ -10,8 +10,6 @@ you need to *see* the posture, for instance before commanding joints directly. T
 the model, not a camera: it shows no table objects and no held object, and proves no grasp.
 """
 
-import numpy as np
-
 from util import render
 
 MOTION = False

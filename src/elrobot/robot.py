@@ -24,7 +24,6 @@ from .kinematics import (
     approach_from_pitch,
     jaw_from_yaw,
     quat_from_matrix,
-    unit,
 )
 from .link import Link
 from .motion import Trajectory, interpolate_joint
@@ -311,25 +310,13 @@ class Robot:
     def plan_linear(self, q_start, pos, *, approach=None, step: float = 0.008, allow_low: bool = False) -> np.ndarray:
         """Joint path that moves the TCP in a straight line to `pos`, holding `approach`
         (defaults to the current approach direction)."""
-        T0 = self.kin.fk(q_start)
-        p0 = T0[:3, 3]
-        a = unit(approach) if approach is not None else T0[:3, 2]
-        pos = np.asarray(pos, dtype=float)
-        n = max(2, int(math.ceil(np.linalg.norm(pos - p0) / step)) + 1)
-        path = [np.asarray(q_start, dtype=float)]
-        for k in range(1, n):
-            p = p0 + (pos - p0) * (k / (n - 1))
-            r = self.kin.ik(p, approach=a, q_seed=path[-1], limit_margin=self.cfg.limit_margin,
-                            random_seeds=0, ref_weight=0.05, pos_tol=0.002, ang_tol=math.radians(4))  # fmt: skip
-            if not r.ok:
-                raise RobotError(f"can't move in a straight line to there: stuck {100 * k / (n - 1):.0f}% of the way ({r.describe()})")
-            if np.max(np.abs(r.q - path[-1])) > 0.35:
-                raise RobotError("can't move in a straight line to there: the arm would have to flip configuration")
-            path.append(r.q)
+        path, r = self.kin.ik_line(q_start, pos, approach=approach, step=step, limit_margin=self.cfg.limit_margin)
+        if not r.ok:
+            raise RobotError(f"can't move in a straight line to there: {r.reason} (pos_err={r.pos_err * 1000:.1f}mm ang_err={math.degrees(r.ang_err):.1f}deg)")
         why = self.check_path(path, allow_low=allow_low)
         if why:
             raise RobotError(f"straight-line move rejected: {why}")
-        return np.array(path)
+        return path
 
     def _emit_plan(self, path, target: dict | None = None) -> None:
         if self.on_plan is None:
