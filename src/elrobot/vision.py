@@ -95,6 +95,14 @@ class CameraModel:
     t_tool_cam: list[float] = field(default_factory=lambda: [0.0, -0.045, -0.10])
     calibrated: bool = False
     rms_px: float | None = None
+    # A camera fixed in the room (not on the arm) stores its pose in the base frame here instead;
+    # when set, the tool pose passed to the projection methods is ignored.
+    rvec_base_cam: list[float] | None = None
+    t_base_cam: list[float] | None = None
+
+    @property
+    def fixed(self) -> bool:
+        return self.rvec_base_cam is not None and self.t_base_cam is not None
 
     @property
     def K(self) -> np.ndarray:
@@ -114,6 +122,17 @@ class CameraModel:
         T[:3, 3] = self.t_tool_cam
         return T
 
+    def T_base_cam(self, T_base_tool: np.ndarray | None = None) -> np.ndarray:
+        """Camera pose in the base frame: fixed for a room camera, else carried by the tool."""
+        if self.fixed:
+            T = np.eye(4)
+            T[:3, :3] = cv2.Rodrigues(np.asarray(self.rvec_base_cam, dtype=float))[0]
+            T[:3, 3] = self.t_base_cam
+            return T
+        if T_base_tool is None:
+            raise ValueError("a wrist camera needs the current tool pose")
+        return T_base_tool @ self.T_tool_cam()
+
     def scaled(self, width: int, height: int) -> "CameraModel":
         """The same camera at another image size (the Station can be set to other resolutions)."""
         if (width, height) == (self.width, self.height):
@@ -131,9 +150,9 @@ class CameraModel:
         r = np.array([pt[0], pt[1], 1.0])
         return r / np.linalg.norm(r)
 
-    def pixel_to_plane(self, u: float, v: float, T_base_tool: np.ndarray, plane_z: float) -> np.ndarray | None:
+    def pixel_to_plane(self, u: float, v: float, T_base_tool: np.ndarray | None, plane_z: float) -> np.ndarray | None:
         """Where the ray through pixel (u, v) meets the horizontal plane z = plane_z (base frame)."""
-        T = T_base_tool @ self.T_tool_cam()
+        T = self.T_base_cam(T_base_tool)
         d = T[:3, :3] @ self.ray_cam(u, v)
         o = T[:3, 3]
         if d[2] > -1e-3:  # ray does not go down towards the table
@@ -141,9 +160,9 @@ class CameraModel:
         s = (plane_z - o[2]) / d[2]
         return o + s * d
 
-    def project(self, p_base, T_base_tool: np.ndarray) -> tuple[float, float] | None:
+    def project(self, p_base, T_base_tool: np.ndarray | None) -> tuple[float, float] | None:
         """Pixel where a base-frame point appears, or None if it is behind the camera."""
-        T = np.linalg.inv(T_base_tool @ self.T_tool_cam())
+        T = np.linalg.inv(self.T_base_cam(T_base_tool))
         pc = T[:3, :3] @ np.asarray(p_base, dtype=float) + T[:3, 3]
         if pc[2] <= 1e-4:
             return None
