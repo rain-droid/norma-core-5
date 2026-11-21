@@ -23,8 +23,8 @@ def place_at(ctx, x: float, y: float, z: float = 0.0, yaw: float | None = None) 
     target = np.array([x, y, plan.table_z + z], dtype=float)
     ctx.emit("markers", markers=[{"id": "target", "label": "place", "pos": target.tolist(), "color": "#5ab0ff", "radius": 0.014}])
     approach, pitch, q_hover, hover_pos, drop = plan.approach_for(target, z + RELEASE_ABOVE, yaw)
+    down = plan.line(q_hover, drop, approach=approach, allow_low=True)  # planned before anything moves
     arm.joints(q_hover, speed=0.8, label="carrying")
-    down = plan.line(arm.q(), drop, approach=approach, allow_low=True)
     arm.joints(down, speed=0.5, allow_low=True, label="lowering")
     arm.joints(gripper=1.0, label="releasing")
     # back out along the same straight line, so the gripper cannot sweep what it just put down

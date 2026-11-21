@@ -145,6 +145,10 @@ class Arm:
         res = _request("/api/torque", {"enable": bool(enable)})
         if not res.get("ok"):
             raise RobotError(res.get("error") or "the torque command was refused")
+        for _ in range(30):  # the servos report the change a moment later
+            if self.state()["torque"] == bool(enable):
+                return
+            time.sleep(0.05)
 
     def stop(self) -> None:
         """Halt any motion now and hold position. Always allowed."""

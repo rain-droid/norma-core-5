@@ -17,7 +17,7 @@ in; along the finger pads it stays wherever x, y put it.
 `yaw` rotates the jaws about the vertical, degrees; 0 closes left-right. Pass the `yaw_deg`
 find_objects reported so the jaws close across a flat side. The jaws open 53 mm.
 `grasp_height` is where the tool point ends up above the table: about half the object's height,
-never less than 0.012. Beyond about 27 cm the gripper has to lean, and leaning jaws that are
+never less than 0.013 (the fingertips are 12 mm beyond the tool point). Beyond about 27 cm the gripper has to lean, and leaning jaws that are
 also turned (`yaw` not 0) dip one fingertip towards the table: such a grasp needs 0.020 or more.
 
 `refine: true` adds a look through the wrist camera from the hover point and shifts x, y onto
@@ -63,8 +63,10 @@ def pick_at(ctx, x: float, y: float, yaw: float | None = None, grasp_height: flo
     target = np.array([x, y, plan.table_z], dtype=float)
     corrections = []
 
-    arm.joints(gripper=1.0, label="opening")
+    # plan the whole approach before anything moves, so an impossible grasp is refused with the arm where it was
     approach, pitch, q_hover, hover_pos, grasp = plan.approach_for(target, grasp_height, yaw)
+    down = plan.line(q_hover, grasp, approach=approach, allow_low=True)
+    arm.joints(gripper=1.0, label="opening")
     arm.joints(q_hover, speed=0.9, label="reaching")
     if refine:
         for _ in range(2):
@@ -75,10 +77,10 @@ def pick_at(ctx, x: float, y: float, yaw: float | None = None, grasp_height: flo
             corrections.append(round(shift * 1000, 1))
             target = better
             approach, pitch, q_hover, hover_pos, grasp = plan.approach_for(target, grasp_height, yaw)
+            down = plan.line(q_hover, grasp, approach=approach, allow_low=True)
             arm.joints(q_hover, speed=0.6, label="lining up")
     ctx.emit("markers", markers=[{"id": "target", "label": "pick", "pos": target.tolist(), "color": "#3ddc84", "radius": 0.014}])
 
-    down = plan.line(arm.q(), grasp, approach=approach, allow_low=True)
     arm.joints(down, speed=0.5, allow_low=True, label="descending")
     grip = arm.joints(gripper=0.0, label="grasping")["gripper"]
     if not grip["holding"]:

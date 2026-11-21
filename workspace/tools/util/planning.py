@@ -40,9 +40,10 @@ class Planner:
         return self.kin.fk(q)
 
     def blocked(self, q, allow_low: bool = False) -> str | None:
-        """Why the robot side would refuse this configuration, or None."""
+        """Why the robot side would refuse this configuration, or None. Plans keep half a
+        millimetre more than it asks for, so rounding on the way over cannot tip one into a refusal."""
         e = self.envelope
-        return self.kin.clearance(q, table_z=self.table_z, floor=0.0 if allow_low else e["floor"], body=e["body"], min_y=e["min_y"])
+        return self.kin.clearance(q, table_z=self.table_z, floor=0.0005 if allow_low else e["floor"] + 0.0005, body=e["body"], min_y=e["min_y"])
 
     def solve(self, pos, *, pitch: float | None = None, yaw: float | None = None, approach=None, q_seed=None,
               allow_low: bool = False) -> IKResult:  # fmt: skip
