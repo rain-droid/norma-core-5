@@ -61,4 +61,38 @@ Station (:8888) ⇄ Link ⇄ Robot ⇄ Skills ⇄ tools registry ⇄ daemon HTTP
 - Joint ranges: Station calibration, stored in servo EEPROM / NormFS; done with `scripts/calibrate.py --manual`.
 - Cameras: two identical "KD-USB Camera"s, `wrist` and `top`, told apart only by the USB-port-encoded unique id in `config.yaml` (re-run `probe.py` and swap if replugged). `scripts/calibrate_camera.py` (core in `calib.py`) does lens intrinsics with an 8x6-inner-corner, 25 mm chessboard, the fixed camera's pose by touching AprilTag (`tag25h9`) centres with the limp arm, and the wrist camera's mounting by hand-eye calibration. Results go to `data/camera_<name>.json`, which `Skills` loads (`camera_wrist.json`). The extrinsics/verify steps talk to the running daemon, not the Station.
 - `data/sit_pose.json`: the folded resting pose. Runtime output goes to `logs/` (gitignored).
-- Skills and tools currently use only the wrist camera; the top camera is not yet used for 3D.
+- The daemon's skills (`skills.py`) use only the wrist camera. The agent workspace (`workspace/tools/`) measures with the top camera, calibrated from the mat's AprilTags into `workspace/robot_config/camera_top.json` (`tools/calibrate_top.py`).
+- Servo calibration backup: `calibration/station-calib.zip` (restore into `station/` with the Station stopped). The arm servos' overload threshold is 60 % (`scripts/servo_overload.py`); Station auto-calibration resets it to 25 %.
+
+## Station build notes (macOS)
+
+Besides the steps above: `prost-build` needs `protoc` (a prebuilt one in `refs/protoc/` works, set `PROTOC` and `PROTOC_INCLUDE`); the Station embeds its viewer, so build `software/station/clients/station-viewer` (`npm ci && npm run build`) before `cargo build --release -p station`. Homebrew's `rustup` builds cmake from source on older macOS; the official rustup installer is faster. macOS asks for camera access on the first start; when the Station is launched from a background shell the request is denied silently ("Camera access denied" in `logs/station.log`): allow the terminal app under System Settings → Privacy & Security → Camera and restart.
+
+## What needs improving
+
+Found in a review on 2026-11-21, not yet fixed. Roughly in order of how much they hurt.
+
+Correctness:
+- **Jaw yaw is wrong for tilted approaches.** `find_objects.jaw_yaw` measures yaw from the base x axis, but `jaw_from_yaw` (`kinematics.py`) uses base x only for a straight-down approach and `cross(up, approach)` otherwise. Grasps off to the side or beyond ~27 cm turn the jaws by the target's angle from the y axis (~39° at (0.2, 0.25)). Fix in `planning.approach_for` / `skills._approach_for`, or make `jaw_from_yaw` always reference base x.
+- **Wrist calibration never reaches the workspace.** `calibrate_camera.py` writes `data/camera_wrist.json`; the workspace reads `workspace/robot_config/camera_wrist.json`. Add a symlink like the one for `sit_pose.json`, or read one path.
+- **Stale frames.** `workspace/tools/util/arm.py` `Arm.frame` accepts frames up to 2 s old (possibly from before the last move); `capture.freeze` records the pose after the frames. Require a frame newer than the last command, read q before and after capturing.
+- **Silent failures.** `robot_config/control.py` (`Robot.step`/`call`) returns `{"error": ...}` instead of raising; `tools/home.py` swallows a failed lift.
+- **`observe()` mixes moments**: `latest.json`, `state.json` and the fixed-name JPEGs are rewritten separately at 2 Hz. Publish one consistent snapshot (state inside `latest.json`, images under per-sequence names).
+- Top camera ignores image size (`capture.TopCamera` never checks the calibration's `image_size`); `place_at` always releases 22 mm above the surface whatever `grasp_height` `pick_at` used.
+
+Daemon / sharing the arm:
+- **IK runs on the asyncio loop** (`robot.py` solve/plan) and stalls servo reading and the UI stream while it solves; `Kinematics` shares pinocchio data between calls, so it is not safe to call concurrently. Run IK with `asyncio.to_thread` and per-call `createData()`.
+- **Tunnels bypass the access key**: requests from 127.0.0.1 need no key, and a reverse proxy or tunnel (cloudflared, ngrok, the Vite dev server) delivers remote requests from 127.0.0.1. Treat requests carrying `X-Forwarded-For` / `CF-Connecting-IP` as remote before exposing the daemon that way. Tailscale is fine as is.
+- The access key travels over plain HTTP; fine on a team network, not on an open one.
+- MCP shim and voice agent send single commands only; they get refused while someone else holds control instead of queueing.
+
+Structure:
+- Pick/place/approach logic exists twice (`skills.py` and `workspace/tools/`), as do the camera models (`vision.CameraModel` vs the workspace's homography `TopCamera`), FK (three times), `READY_DEG`, jaw masks and colour naming. Decide which path stays.
+
+Simulation (goal: train policies):
+- `simworld.py` is fine for integration tests and agent runs, not for training: real-time only (asyncio sleeps), not deterministic, no reset/step API, physics only runs inside camera rendering, blocks cannot rotate, arm and jaws pass through objects, the gripper ignores orientation (so it cannot catch the yaw bug above), flat rendering. Plan: MuJoCo from the URDF behind a gym-style `reset()/step(action)`, plus a `MujocoLink` with `SimLink`'s interface so daemon, UI and agent run on it unchanged.
+
+Next features:
+- Feedback loop: continuous visual servoing on the wrist camera during the approach (frames timestamped against joint state) instead of stop-look-move; a local executor that runs a whole plan without LLM round trips and retries known failures itself.
+- Finding the requested object: colour-numbered scan first, an open-vocabulary detector (YOLO-World / OWLv2) only when the request is ambiguous.
+- Goals: chess (board pose calibrated once, squares as fixed coordinates, occupancy check with the top camera, moves from an engine) and a mid-air handover between two arms (shared frame from AprilTags, one daemon per arm plus a coordinator).
