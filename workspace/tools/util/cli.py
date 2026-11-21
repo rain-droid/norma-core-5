@@ -124,6 +124,8 @@ def call(function, arguments: dict | None = None) -> dict:
         result = {"error": str(e), "error_kind": "robot"}
     except Exception as e:  # a bug in a tool file: whoever edits it needs the traceback
         result = {"error": f"{type(e).__name__}: {e}", "error_kind": "tool_bug", "traceback": traceback.format_exc(limit=8)}
+    finally:
+        arm.release_control()  # control asked for by this call ends with it (a session's stays)
     result["history"] = str(history.relative_to(ROOT))
     if ctx.images:
         result["images"] = ctx.images

@@ -63,6 +63,7 @@ export const manualStore = createStore<ManualState>({ pending: null, result: nul
 function describe(res: ToolResult): { ok: boolean; text: string } {
   if (res.ok) return { ok: true, text: res.summary || 'done' };
   if (res.error === 'busy') return { ok: false, text: 'Busy: the arm is still doing something else.' };
+  if (res.error === 'control') return { ok: false, text: `${res.summary ?? 'Someone else has control of the arm.'}` };
   return { ok: false, text: res.summary || res.error || 'That did not work.' };
 }
 

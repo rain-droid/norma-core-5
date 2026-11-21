@@ -42,6 +42,7 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Gripper | `open_gripper`, `close_gripper` | jaws only |
 | Whole manipulations | `pick_at`, `place_at` | yes |
 | Poses and safety | `home`, `rest`, `stop` | `stop` always works |
+| Sharing the arm | `control` (`acquire` / `release` / `status`) | no |
 
 A session usually goes: `home` (wakes the arm and gets it out of the camera's way),
 `find_objects` and open its image, act, look again to confirm, and `rest` when you are done
@@ -83,6 +84,10 @@ on its behalf, but it only knows about the arm and the table, not about objects 
   the base, x to the robot's right, y forward, z up.
 - `check: false` and `allow_low: true` remove or loosen the robot side's clearance guard. Use
   them deliberately, with small steps, after `read_proprioception`.
+- The arm is shared with people at the web UI and other scripts. A tool that moves it waits for
+  control and gives it back when it ends. For a task of several calls, `tools/control.py
+  '{"action": "acquire"}'` first and `release` at the end, so nobody moves things in between.
+  A person can take control from you at any time: then your motion stops, and you look again.
 - If something looks wrong or a person reaches in, `tools/stop.py` first, think second.
 - When you learn something about this arm or this table that the next session should know,
   write it into the relevant skill or tool docstring.

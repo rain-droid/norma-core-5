@@ -15,7 +15,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class Config:
     # --- processes
     station_host: str = "127.0.0.1:8888"
-    host: str = "127.0.0.1"
+    host: str = "127.0.0.1"  # "0.0.0.0" (or `elrobot up --lan`) serves other machines too
+    # Required from every client that is not on this machine. Leave it out of config.yaml (it is
+    # committed): set ELROBOT_KEY, or let `--lan` make one up and print it.
+    access_key: str | None = None
+    control_ttl_s: float = 20.0  # a control ticket lapses after this long without a sign of life
     port: int = 8765
     sim: bool = False
     voice: bool = True  # start the conversational agent with the daemon
@@ -89,6 +93,10 @@ class Config:
             cfg.sim = os.environ["ELROBOT_SIM"] not in ("0", "false", "")
         if os.environ.get("ELROBOT_VOICE"):
             cfg.voice = os.environ["ELROBOT_VOICE"] not in ("0", "false", "")
+        if os.environ.get("ELROBOT_HOST"):
+            cfg.host = os.environ["ELROBOT_HOST"]
+        if os.environ.get("ELROBOT_KEY"):
+            cfg.access_key = os.environ["ELROBOT_KEY"]
         if os.environ.get("ELROBOT_PORT"):
             cfg.port = int(os.environ["ELROBOT_PORT"])
         if os.environ.get("ELROBOT_STATION"):

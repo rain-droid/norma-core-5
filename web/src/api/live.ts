@@ -1,14 +1,19 @@
 import type { CameraSource, Transport, TransportHandlers } from './transport.ts';
-import type { ChatResult, ServerMessage, ToolResult, UtteranceResult } from './types.ts';
+import { controlToken } from './controlToken.ts';
+import type { ChatResult, ControlReply, ServerMessage, ToolResult, UtteranceResult } from './types.ts';
 
 const BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
 /** `state` arrives at ~30 Hz, so this much silence means the socket is dead. */
 const SILENCE_MS = 4000;
 
 async function post<T>(path: string, body?: unknown, form?: FormData): Promise<T> {
+  const headers: Record<string, string> = form ? {} : { 'Content-Type': 'application/json' };
+  // Our control ticket, if we hold or wait for control: the daemon moves the arm only for its holder.
+  const token = controlToken.get();
+  if (token) headers['X-Control-Token'] = token;
   const res = await fetch(path, {
     method: 'POST',
-    headers: form ? undefined : { 'Content-Type': 'application/json' },
+    headers,
     body: form ?? JSON.stringify(body ?? {}),
   });
   const text = await res.text();
@@ -147,5 +152,9 @@ export class LiveTransport implements Transport {
 
   camera(name: string): CameraSource {
     return { kind: 'mjpeg', url: `/api/camera/${encodeURIComponent(name)}/stream.mjpg` };
+  }
+
+  control(action: 'request' | 'release' | 'take', body: Record<string, unknown> = {}): Promise<ControlReply> {
+    return post<ControlReply>(`/api/control/${action}`, body);
   }
 }

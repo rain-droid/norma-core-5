@@ -1764,3 +1764,55 @@
     display: none;
   }
 }
+
+/* ---- control of the arm: who has it, who waits */
+
+.control {
+  padding: 0.5rem 0.75rem 0.45rem;
+  gap: 0.25rem;
+  flex: none;
+}
+
+.control[data-mine='true'] {
+  box-shadow: var(--lift), inset 0 0 0 2px var(--ink);
+}
+
+.control__row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.control__line {
+  font-weight: 750;
+  font-size: var(--t-small);
+  flex: 1;
+}
+
+.control__btns {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex: none;
+}
+
+.control__queue,
+.control__me {
+  font-size: var(--t-small);
+  color: var(--ink-soft);
+}
+
+.control__namebtn {
+  font: inherit;
+  font-weight: 750;
+  color: var(--ink);
+  text-decoration: underline dotted;
+}
+
+.control__name {
+  font: inherit;
+  width: 10rem;
+}
+
+.control__error {
+  color: var(--bad, #c0392b);
+}

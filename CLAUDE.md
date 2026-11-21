@@ -17,6 +17,7 @@ uv run --with pytest pytest tests/test_kinematics.py::test_zero_pose_matches_mes
 
 uv run elrobot up                         # Station + daemon (needs bin/station and hardware)
 uv run elrobot up --sim                   # daemon only, simulated servos, no hardware
+uv run elrobot up --lan                   # also serve other machines (prints URL + access key); see docs/API.md "Control"
 uv run elrobot call home                  # call one tool on the running daemon
 uv run elrobot-mcp                        # MCP stdio shim (wired up in .mcp.json)
 python -m elrobot.voice                   # voice-agent REPL against a stub robot
@@ -29,7 +30,7 @@ uv run python scripts/calibrate_camera.py --help  # camera lens/pose calibration
 
 Web UI (`web/`, React + three.js + Vite): `npm install && npm run dev` (port 5173, proxies `/api`, `/ws`, `/assets` to the daemon on 8765); `npm run build` writes `web/dist`, which the daemon serves at `/`; `npm run typecheck`.
 
-`ELROBOT_SIM`, `ELROBOT_VOICE`, `ELROBOT_PORT`, `ELROBOT_STATION` override `config.yaml`; every config key and its default lives in `src/elrobot/config.py` (unknown keys in `config.yaml` are an error).
+`ELROBOT_SIM`, `ELROBOT_VOICE`, `ELROBOT_PORT`, `ELROBOT_HOST`, `ELROBOT_KEY`, `ELROBOT_STATION` override `config.yaml`; every config key and its default lives in `src/elrobot/config.py` (unknown keys in `config.yaml` are an error).
 
 ## Station (Rust, not built here)
 

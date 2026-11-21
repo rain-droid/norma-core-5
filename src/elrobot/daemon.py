@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import itertools
 import json
 import logging
@@ -19,12 +20,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import numpy as np
 
 from . import tools as toolreg
 from .config import Config
+from .control import ControlQueue, NotYourTurn
 from .kinematics import Kinematics
 from .link import Link, SimLink, StationLink
 from .motion import interpolate_joint
@@ -49,6 +51,7 @@ class Hub:
         self.sockets: set[WebSocket] = set()
         self._task_lock = asyncio.Lock()  # one motion tool at a time
         self._current_call: str | None = None
+        self.control = ControlQueue(cfg.control_ttl_s, on_change=self._on_control, is_moving=self._task_lock.locked)
         self.voice = None
         self.workspace = Workspace(self, cfg.workspace_dir) if cfg.workspace_dir.is_dir() else None
         if isinstance(self.link, SimLink):
@@ -81,6 +84,21 @@ class Hub:
         """For the voice service, which hands over {"kind": ..., ...}."""
         ev = dict(ev)
         self.emit(ev.pop("kind"), **ev)
+
+    def _on_control(self, text: str) -> None:
+        self.emit("log", level="info", topic="control", text=text)
+
+    def state(self) -> dict:
+        """The `state` message: the robot's measurements plus who has control of the arm."""
+        return {**self.robot.snapshot(), "control": self.control.status()}
+
+    def _check_control(self, token: str | None) -> str | None:
+        """None if a motion request with this ticket may run now, else why not."""
+        try:
+            self.control.check(token)
+        except NotYourTurn as e:
+            return str(e)
+        return None
 
     def _on_plan(self, path: list, target: dict | None) -> None:
         self.emit("plan", call_id=self._current_call, path=path, target=target)
@@ -118,7 +136,7 @@ class Hub:
 
     # ---- tools
 
-    async def call_tool(self, name: str, args: dict, source: str = "api") -> dict:
+    async def call_tool(self, name: str, args: dict, source: str = "api", token: str | None = None) -> dict:
         t = toolreg.TOOLS.get(name)
         if t is None:
             return {"ok": False, "error": f"unknown tool '{name}'", "summary": f"unknown tool '{name}'"}
@@ -144,6 +162,8 @@ class Hub:
             return finish(False, str(e), str(e))
         self.emit("tool_start", call_id=call_id, tool=name, args=kwargs, source=source)
 
+        if t.motion and (why := self._check_control(token)):
+            return finish(False, why, "control")
         if t.motion and self._task_lock.locked():
             return finish(False, f"busy: the arm is in the middle of '{self.robot.activity}'. Wait, or call stop() first.", "busy")
         try:
@@ -154,6 +174,7 @@ class Hub:
                     try:
                         res = await t.fn(self.skills, **kwargs)
                     finally:
+                        self.control.touch(token)
                         self._current_call = None
                         self.robot.source = None
                         self.robot.activity = "idle"
@@ -171,7 +192,7 @@ class Hub:
 
     # ---- joint commands: all the agent workspace can ask of the arm
 
-    async def joint_command(self, body: dict) -> dict:
+    async def joint_command(self, body: dict, token: str | None = None) -> dict:
         """Carry out one joint command: waypoints of seven joint angles (rad) and/or a jaw opening.
 
         No poses, no inverse kinematics and no named skills cross this line. What does is held
@@ -201,6 +222,8 @@ class Hub:
             path, gripper, speed = self._parse_joint_command(body)
         except (TypeError, ValueError) as e:
             return done(str(e), "invalid")
+        if why := self._check_control(token):
+            return done(why, "control")
         if self._task_lock.locked():
             return done(f"busy: the arm is in the middle of '{robot.activity}'. Wait, or stop it first.", "busy")
         async with self._task_lock:
@@ -222,6 +245,7 @@ class Hub:
             except RobotError as e:
                 return done(str(e))
             finally:
+                self.control.touch(token)
                 self._current_call, robot.source, robot.activity = None, None, "idle"
                 self.emit("plan", call_id=call_id, path=[], target=None)
                 if self.workspace is not None:
@@ -283,7 +307,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             await asyncio.sleep(1 / 30)
             if hub.sockets:
                 try:
-                    hub._broadcast(hub.robot.snapshot())
+                    hub._broadcast(hub.state())
                 except Exception:
                     log.exception("state broadcast failed")
 
@@ -318,6 +342,26 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     app = FastAPI(title="ElRobot daemon", lifespan=lifespan)
     app.state.hub = hub
 
+    # ---- access from other machines: everything needs the key, except from this machine
+    key = cfg.access_key
+
+    def allowed(host: str | None, headers, cookies, query) -> bool:
+        if not key or _is_local(host):
+            return True
+        given = headers.get("x-elrobot-key") or cookies.get(KEY_COOKIE) or query.get("key") or ""
+        return hmac.compare_digest(given.encode(), key.encode())
+
+    @app.middleware("http")
+    async def access(request: Request, call_next):
+        if not allowed(request.client.host if request.client else None, request.headers, request.cookies, request.query_params):
+            if request.url.path.startswith(("/api", "/ws")):
+                return JSONResponse({"ok": False, "error": "access key missing or wrong (header X-Elrobot-Key, or open the UI once with ?key=...)"}, 401)
+            return HTMLResponse(KEY_PAGE, 401)
+        resp = await call_next(request)
+        if key and request.query_params.get("key") == key:  # the browser keeps it, so streams and the socket carry it too
+            resp.set_cookie(KEY_COOKIE, key, max_age=30 * 86400, httponly=True, samesite="lax")
+        return resp
+
     # The voice agent is optional: without its package the daemon still serves everything else.
     # Its routes must be registered before the catch-all static mount at "/" below.
     if cfg.voice:
@@ -331,6 +375,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.websocket("/ws")
     async def ws(sock: WebSocket):
+        if not allowed(sock.client.host if sock.client else None, sock.headers, sock.cookies, sock.query_params):
+            await sock.close(code=4401)
+            return
         await sock.accept()
         await sock.send_text(json.dumps({**hub.meta(), "events": list(hub.events)}, separators=(",", ":")))
         hub.sockets.add(sock)
@@ -344,7 +391,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/state")
     async def state():
-        return hub.robot.snapshot()
+        return hub.state()
 
     @app.get("/api/meta")
     async def meta():
@@ -382,7 +429,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             body = await request.json()
         except Exception:
             body = {}
-        return JSONResponse(await hub.call_tool(name, body.get("args") or {}, body.get("source") or "api"))
+        return JSONResponse(await hub.call_tool(name, body.get("args") or {}, body.get("source") or "api", _token(request, body)))
 
     @app.post("/api/joints")
     async def joints(request: Request):
@@ -392,7 +439,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             body = None
         if not isinstance(body, dict):
             raise HTTPException(400, "body must be a JSON object")
-        return JSONResponse(await hub.joint_command(body))
+        return JSONResponse(await hub.joint_command(body, _token(request, body)))
 
     @app.post("/api/event")
     async def event(request: Request):
@@ -412,6 +459,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.post("/api/torque")
     async def torque(request: Request):
         body = await request.json()
+        if why := hub._check_control(_token(request, body)):
+            return JSONResponse({"ok": False, "error": why, "kind": "control"})
         try:
             if body.get("enable"):
                 await hub.robot.enable()
@@ -421,6 +470,42 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             return JSONResponse({"ok": False, "error": str(e)})
         hub.emit("log", level="info", text="torque on" if body.get("enable") else "torque off: the arm is limp")
         return {"ok": True}
+
+    # ---- control of the arm: ask, wait your turn, hold, release (see control.py)
+
+    @app.get("/api/control")
+    async def control_status(request: Request):
+        return hub.control.status(_token(request, {}))
+
+    @app.post("/api/control/request")
+    async def control_request(request: Request):
+        """Join the queue, or refresh a ticket you have. With `wait` (s, at most 25) the answer
+        comes once control is yours or the time is up, so a client can loop on it."""
+        body = await _body(request)
+        t = hub.control.request(str(body.get("name") or "someone"), str(body.get("kind") or "agent"),
+                                _token(request, body), body.get("ttl_s"))  # fmt: skip
+        deadline = time.monotonic() + min(25.0, max(0.0, float(body.get("wait") or 0)))
+        while hub.control.holder is not t and hub.control.find(t.token) is not None and time.monotonic() < deadline:
+            await hub.control.wait_change(min(1.0, deadline - time.monotonic()))
+            hub.control.touch(t.token)
+            hub.control.expire()  # a holder that went quiet lapses even when nothing else happens
+        return {"token": t.token, **hub.control.status(t.token)}
+
+    @app.post("/api/control/release")
+    async def control_release(request: Request):
+        body = await _body(request)
+        return {"ok": hub.control.release(_token(request, body)), **hub.control.status()}
+
+    @app.post("/api/control/take")
+    async def control_take(request: Request):
+        """Take control now, ahead of the queue; stops a motion the previous holder has running.
+        Meant for a person at the UI; the previous holder gets the arm back after."""
+        body = await _body(request)
+        t, prev = hub.control.take(str(body.get("name") or "someone"), str(body.get("kind") or "human"),
+                                   _token(request, body), body.get("ttl_s"))  # fmt: skip
+        if prev is not None and hub._task_lock.locked():
+            await hub.stop()
+        return {"token": t.token, **hub.control.status(t.token)}
 
     app.mount("/assets", StaticFiles(directory=cfg.assets_dir), name="assets")
 
@@ -433,6 +518,32 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             return {"ok": True, "note": "web UI not built yet (run `npm run build` in web/)", "api": "/api/meta"}
 
     return app
+
+
+KEY_COOKIE = "elrobot_key"
+KEY_PAGE = """<!doctype html><meta name=viewport content="width=device-width"><title>elrobot</title>
+<body style="font-family:system-ui;max-width:24rem;margin:5rem auto;padding:0 1rem">
+<h2>elrobot</h2><p>This robot is shared over the network. Enter the access key printed where the daemon was started.</p>
+<form><input name=key autofocus style="font-size:1.1rem;width:100%;padding:.4rem" placeholder="access key">
+<button style="margin-top:.6rem;font-size:1rem">Open</button></form></body>"""
+
+
+def _is_local(host: str | None) -> bool:
+    return host in ("127.0.0.1", "::1", "localhost", "testclient")
+
+
+def _token(request: Request, body: dict | None) -> str | None:
+    """The control ticket a request carries: header X-Control-Token, or `control` in the body."""
+    t = request.headers.get("x-control-token") or (body or {}).get("control") or request.query_params.get("control")
+    return str(t) if t else None
+
+
+async def _body(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except Exception:
+        return {}
+    return body if isinstance(body, dict) else {}
 
 
 async def _start_voice(hub: Hub) -> None:

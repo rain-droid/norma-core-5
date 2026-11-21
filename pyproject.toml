@@ -50,4 +50,6 @@ elrobot-agent = { path = ".", editable = true }
 [tool.pixi.tasks]
 sim = "elrobot up --sim --no-voice"
 up = "elrobot up --no-voice"
+serve = "elrobot up --lan --no-voice"
+serve-sim = "elrobot up --lan --sim --no-voice"
 test = "pytest -q"

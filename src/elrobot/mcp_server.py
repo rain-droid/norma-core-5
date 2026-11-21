@@ -21,6 +21,7 @@ from . import tools as toolreg
 
 DAEMON = os.environ.get("ELROBOT_DAEMON", "http://127.0.0.1:8765")
 SOURCE = os.environ.get("ELROBOT_SOURCE", "claude-code")
+HEADERS = {"X-Elrobot-Key": os.environ["ELROBOT_KEY"]} if os.environ.get("ELROBOT_KEY") else {}
 
 INSTRUCTIONS = """\
 You are controlling a real robot arm (NormaCore ElRobot: 7 joints and a parallel gripper) sitting on a table, \
@@ -51,7 +52,7 @@ async def on_call_tool(ctx, params: types.CallToolRequestParams) -> types.CallTo
         return types.CallToolResult(content=[types.TextContent(type="text", text=msg)], is_error=error)
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=3.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=3.0), headers=HEADERS) as client:
             r = await client.post(f"{DAEMON}/api/tools/{params.name}", json={"args": params.arguments or {}, "source": SOURCE})
             r.raise_for_status()
             res = r.json()

@@ -71,6 +71,27 @@ export interface CameraInfo {
   age_ms: number;
 }
 
+/** One client holding or waiting for control of the arm. */
+export interface ControlEntry {
+  id: string;
+  name: string;
+  kind: 'human' | 'agent';
+  for_s: number;
+}
+
+/** Who may move the arm (holder) and who waits for it, in order. */
+export interface ControlStatus {
+  holder: ControlEntry | null;
+  queue: ControlEntry[];
+}
+
+/** Answer to asking for / taking control: the ticket, and where it stands. */
+export interface ControlReply extends ControlStatus {
+  token?: string;
+  ok?: boolean;
+  you?: { state: 'granted' | 'waiting' | 'none'; position?: number; ttl_s?: number };
+}
+
 export interface RobotState {
   type: 'state';
   t: number;
@@ -85,6 +106,7 @@ export interface RobotState {
   gripper: GripperState;
   ee: EndEffector;
   cameras: CameraInfo[];
+  control?: ControlStatus;
 }
 
 interface EventBase {
@@ -157,6 +179,8 @@ export interface LogEvent extends EventBase {
   kind: 'log';
   level: 'info' | 'warn' | 'error';
   text: string;
+  /** `control`: someone asked for, got, gave back or took control of the arm. */
+  topic?: string;
 }
 
 export interface ChatEvent extends EventBase {

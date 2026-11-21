@@ -110,3 +110,25 @@ def test_top_camera_measures_at_a_height(robot):
     cal = world.calibration()
     _, eye = camera_from_homography(cal["H_mat_px"], cal["image_size"])
     assert np.allclose(eye, cal["camera_mat"], atol=1e-4)
+
+
+def test_tools_wait_for_control_and_keep_a_session(robot, monkeypatch):
+    import util.arm as arm
+
+    alice = arm._request("/api/control/request", {"name": "alice", "kind": "human"})
+    assert alice["you"]["state"] == "granted"
+    monkeypatch.setattr(arm, "WAIT_FOR_CONTROL_S", 1.0)
+    res = run("open_gripper")
+    assert "alice still has it" in res["error"], res
+    arm._request("/api/control/release", {}, token=alice["token"])
+
+    assert run("control", action="acquire")["granted"]
+    assert arm.read_session()
+    assert "error" not in run("open_gripper")
+    assert run("control")["you"]["state"] == "granted"  # the tool call did not give the session away
+    other = arm._request("/api/control/request", {"name": "bob"})
+    assert other["you"]["state"] == "waiting"
+    assert run("control", action="release")["released"]
+    assert arm._request("/api/control", token=other["token"])["you"]["state"] == "granted"
+    arm._request("/api/control/release", {}, token=other["token"])
+    assert run("control")["holder"] is None

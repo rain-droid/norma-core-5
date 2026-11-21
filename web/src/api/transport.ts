@@ -1,4 +1,4 @@
-import type { ChatResult, ServerMessage, ToolResult, UtteranceResult } from './types.ts';
+import type { ChatResult, ControlReply, ServerMessage, ToolResult, UtteranceResult } from './types.ts';
 
 export interface TransportHandlers {
   onMessage(msg: ServerMessage): void;
@@ -29,4 +29,6 @@ export interface Transport {
   chat(text: string): Promise<ChatResult>;
   utterance(audio: Blob): Promise<UtteranceResult>;
   camera(name: string): CameraSource;
+  /** Ask for control (`request`, also the heartbeat), give it back, or take it now. */
+  control(action: 'request' | 'release' | 'take', body?: Record<string, unknown>): Promise<ControlReply>;
 }

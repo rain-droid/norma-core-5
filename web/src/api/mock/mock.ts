@@ -8,6 +8,8 @@
 import type { CameraSource, Transport, TransportHandlers } from '../transport.ts';
 import type {
   ChatResult,
+  ControlEntry,
+  ControlReply,
   Hello,
   JointMeta,
   JointState,
@@ -115,6 +117,7 @@ export class MockTransport implements Transport {
   /** Bumping this cancels whatever script is running. */
   private epoch = 0;
   private uiBusy = false;
+  private controlHolder: ControlEntry | null = null;
   private eventId = 0;
   private callSeq = 0;
   private turnSeq = 0;
@@ -287,6 +290,7 @@ export class MockTransport implements Transport {
         holding: this.holding !== null,
       },
       ee: pose,
+      control: { holder: this.controlHolder, queue: [] },
       cameras: [
         {
           name: 'wrist',
@@ -862,6 +866,19 @@ export class MockTransport implements Transport {
       this.startDemo(12000);
     });
     return { text, turn_id: turn };
+  }
+
+  /** The demo has nobody else to share with: whoever asks gets control at once. */
+  async control(action: 'request' | 'release' | 'take', body: Record<string, unknown> = {}): Promise<ControlReply> {
+    if (action === 'release') {
+      this.controlHolder = null;
+      return { ok: true, holder: null, queue: [] };
+    }
+    if (!this.controlHolder) {
+      const name = typeof body.name === 'string' ? body.name : 'someone';
+      this.controlHolder = { id: 'demo01', name, kind: 'human', for_s: 0 };
+    }
+    return { token: 'demo-ticket', holder: this.controlHolder, queue: [], you: { state: 'granted', ttl_s: 20 } };
   }
 
   camera(_name: string): CameraSource {

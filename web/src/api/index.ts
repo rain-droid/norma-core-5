@@ -47,4 +47,5 @@ export const api = {
   utterance: (audio: Blob) => active().utterance(audio),
   camera: (name: string) => active().camera(name),
   retryNow: () => active().retryNow(),
+  control: (action: 'request' | 'release' | 'take', body?: Record<string, unknown>) => active().control(action, body),
 };

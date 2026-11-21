@@ -5,6 +5,7 @@ import type { Insets, RobotScene } from './scene/RobotScene.ts';
 import { app } from './state/app.ts';
 import { useStore } from './state/store.ts';
 import { CameraPanel } from './ui/CameraPanel.tsx';
+import { ControlPanel } from './ui/ControlPanel.tsx';
 import { LinkNotices } from './ui/LinkNotices.tsx';
 import { SceneView } from './ui/SceneView.tsx';
 import { SidePanel } from './ui/SidePanel.tsx';
@@ -180,6 +181,7 @@ export function App() {
         </div>
 
         <div className="hud__side" ref={sideRef}>
+          <ControlPanel />
           <CameraPanel />
           <SidePanel />
         </div>

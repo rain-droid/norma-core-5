@@ -9,7 +9,8 @@ NormaCore Station (Rust, :8888 TCP)  <->  daemon (Python, :8765 HTTP + WS)
                                    (Claude Code)    (browser)   (Claude Agent SDK)
 ```
 
-- Base URL: `http://127.0.0.1:8765`
+- Base URL: `http://127.0.0.1:8765`. With `elrobot up --lan` (or `host: 0.0.0.0`) the daemon
+  also serves other machines; see "Access from other machines" below.
 - All bodies are JSON unless stated. All lengths are **metres**, all angles **radians**.
 - Robot base frame: origin on the table under the base, **x = right, y = forward, z = up**
   (seen from behind the robot). This is the URDF frame, unchanged.
@@ -58,7 +59,9 @@ restores the timeline.
   ],
   "gripper": {"open": 0.8, "width_mm": 41.0, "holding": false},
   "ee": {"pos": [0.0, 0.25, 0.12], "quat": [0, 0, 0, 1], "approach": [0, 0, -1]},
-  "cameras": [{"name": "wrist", "width": 640, "height": 480, "fps": 14.8, "age_ms": 40}]
+  "cameras": [{"name": "wrist", "width": 640, "height": 480, "fps": 14.8, "age_ms": 40}],
+  "control": {"holder": {"id": "3f9a1c", "name": "alice", "kind": "human", "for_s": 12.4},
+              "queue": [{"id": "77d0e2", "name": "agent", "kind": "agent", "for_s": 3.1}]}
 }
 ```
 
@@ -72,6 +75,8 @@ restores the timeline.
 - `gripper.open` is 0 (closed) to 1 (fully open). `holding` is true after a verified grasp.
 - `ee` is the tool centre point (between the fingertips) in the base frame. `quat` is
   `[x, y, z, w]`. `approach` is the unit vector the gripper points along.
+- `control`: who holds control of the arm (`holder`, or `null`) and who waits for it, in order.
+  `id` is the first characters of the ticket, for telling entries apart; never the ticket itself.
 
 ### `event`
 
@@ -85,7 +90,7 @@ and a `kind`. Kinds:
 | `plan` | `call_id`, `path`, `target` | planned TCP polyline `[[x,y,z],...]` and `target: {"pos": [...], "approach": [...]}`; an empty `path` clears it |
 | `markers` | `markers` | **replaces** the set of world markers: `[{"id", "label", "pos": [x,y,z], "color", "radius"}]` |
 | `detections` | `camera`, `width`, `height`, `items` | 2D detections on a camera frame: `[{"label", "score", "box": [x1,y1,x2,y2], "point": [u,v], "polygon": [[u,v],...]}]`; `polygon` optional; empty `items` clears |
-| `log` | `level` (`info`/`warn`/`error`), `text` | daemon log line worth showing |
+| `log` | `level` (`info`/`warn`/`error`), `text`, optional `topic` | daemon log line worth showing; `topic: "control"` for changes of who has the arm |
 | `chat` | `role` (`user`/`assistant`), `text`, `turn_id`, `final`, `via` (`voice`/`text`) | conversation transcript. Assistant text may arrive as several events with the same `turn_id`; each carries the **full text so far**, and the last has `final: true` |
 | `speech` | `turn_id`, `seq`, `text`, `url`, `duration_ms` | a synthesised sentence is ready; the browser plays these in `seq` order |
 | `voice_state` | `state` | `idle`, `listening`, `transcribing`, `thinking`, `speaking`, `acting` |
@@ -111,9 +116,44 @@ and a `kind`. Kinds:
   → `{"ok": true, "summary": "...", "data": {...}, "images": [{"mime": "image/jpeg", "b64": "..."}]}`
   or `{"ok": false, "error": "...", "summary": "..."}`. Blocks until the tool finishes.
   Tool names and JSON schemas come from `hello.tools`. A second motion tool called while one
-  is running returns `ok: false` with `error: "busy"`.
+  is running returns `ok: false` with `error: "busy"`. A motion tool from someone who does not
+  hold control while someone else does returns `ok: false` with `error: "control"` (see below).
 - `POST /api/stop` → immediately halts motion and holds position. Always allowed. `{"ok": true}`.
 - `POST /api/torque` with `{"enable": false}` → release (arm goes limp) or re-enable torque.
+  Subject to control like a motion; `{"ok": false, "error": "...", "kind": "control"}` if refused.
+
+### Control: one client moves the arm at a time
+
+The arm is shared: the UI on several laptops, an agent, scripts. A client asks for control,
+waits its turn in a queue, holds the arm until it releases it, and others' motions are refused
+meanwhile. Stop is never subject to this. While nobody holds control and nobody waits, a
+request without a ticket still runs on its own, so single commands need no ceremony.
+
+A request carries its ticket in the header `X-Control-Token` (or as `control` in a JSON body).
+It applies to `/api/tools/*` (motion tools), `/api/joints` and `/api/torque`.
+
+- `POST /api/control/request` with `{"name": "alice", "kind": "human" | "agent", "ttl_s": 20, "wait": 0}`
+  → `{"token": "...", "holder": ..., "queue": [...], "you": {"state": "granted" | "waiting", "position": 1, "ttl_s": 20}}`.
+  Joins the queue (or gets control at once). Sent again with the ticket it refreshes it: this
+  is the heartbeat. `wait` (seconds, at most 25) holds the answer until control is granted or
+  the time is up. A ticket lapses after `ttl_s` (5..600, default `control_ttl_s` = 20) without
+  a request carrying it; the holder never lapses while a motion is running.
+- `POST /api/control/release` (with the ticket) → gives control back, or leaves the queue.
+- `POST /api/control/take` with `{"name": ..., "kind": "human"}` → control now, ahead of the
+  queue. A motion in progress stops; the previous holder goes to the front of the queue.
+- `GET /api/control` (optionally with the ticket) → `{"holder", "queue", "you"}`.
+
+Refusals name the holder, e.g. `"alice has control of the arm. Ask for control ... to queue up, or wait"`.
+The workspace's tools ask for control by themselves (`tools/util/arm.py`); `tools/control.py`
+keeps a ticket across several calls.
+
+### Access from other machines
+
+When `access_key` is set (env `ELROBOT_KEY`; `--lan` makes one up and prints it), every request
+not from this machine needs it: header `X-Elrobot-Key`, or the cookie set by opening the UI once
+with `?key=...` (so the browser's streams and socket carry it). Missing or wrong: `401`, and a
+page asking for the key at `/`. Requests from `127.0.0.1` need no key; that includes whatever the
+Vite dev server proxies, so share the built UI (`npm run build`), not the dev server.
 
 Tools the UI calls directly (stable names): `home`, `rest`, `stop`, `gesture` (`{"name": "wave"}`),
 `gripper` (`{"open": 0.0..1.0}`), `move_joints` (`{"joints": {"1": 0.2}, "relative": true}`).

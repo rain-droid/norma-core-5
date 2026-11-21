@@ -1,5 +1,6 @@
 import type {
   CameraInfo,
+  ControlStatus,
   ChatEvent,
   Detection,
   GripperState,
@@ -71,7 +72,7 @@ export interface LogItem {
   key: string;
   id: number;
   t: number;
-  level: 'warn' | 'error';
+  level: 'info' | 'warn' | 'error';
   text: string;
 }
 
@@ -114,6 +115,8 @@ export interface AppState extends Derived {
   status: StatusSlice | null;
   /** Joint readouts for the panels, republished at ~10 Hz (the 3D view reads `live`). */
   telemetry: Telemetry | null;
+  /** Who holds control of the arm and who waits; changes only when they do (not every tick). */
+  control: ControlStatus | null;
   /** Most recent failed tool call seen live; the face winces at it. */
   failure: { id: number; at: number } | null;
 }
@@ -135,8 +138,16 @@ export const app = createStore<AppState>({
   meta: null,
   status: null,
   telemetry: null,
+  control: null,
   failure: null,
 });
+
+/** Identity of a control picture, ignoring the ever-growing `for_s`. */
+function controlKey(c: ControlStatus | null | undefined): string {
+  if (!c) return '';
+  const e = (x: { id: string; name: string; kind: string }) => `${x.id}:${x.name}:${x.kind}`;
+  return [c.holder ? e(c.holder) : '-', ...c.queue.map(e)].join('|');
+}
 
 /* ------------------------------------------------------------------ */
 /* High-rate robot state, kept outside React for the render loop.      */
@@ -181,7 +192,7 @@ export function resetSession(): void {
   live.latest = null;
   clockOffset = Number.NaN;
   lastEventId = -1;
-  app.set({ ...EMPTY, meta: null, status: null, telemetry: null, failure: null });
+  app.set({ ...EMPTY, meta: null, status: null, telemetry: null, control: null, failure: null });
 }
 
 function onHello(msg: Hello): void {
@@ -239,6 +250,7 @@ function onState(s: RobotState): void {
   const prev = app.get().status;
   const patch: Partial<AppState> = {};
   if (!prev || !shallowEqual(prev, status)) patch.status = status;
+  if (controlKey(s.control) !== controlKey(app.get().control)) patch.control = s.control ?? null;
   if (now - lastTelemetryAt >= TELEMETRY_INTERVAL_MS) {
     lastTelemetryAt = now;
     patch.telemetry = { joints: s.joints ?? [], gripper: s.gripper, cameras: s.cameras ?? [] };
@@ -320,7 +332,8 @@ function reduce(d: Derived, ev: RobotEvent): Derived {
     }
 
     case 'log': {
-      if (ev.level !== 'warn' && ev.level !== 'error') return d;
+      // info is noise on the timeline, except for who got or gave up control of the arm
+      if (ev.level !== 'warn' && ev.level !== 'error' && ev.topic !== 'control') return d;
       const item: LogItem = { kind: 'log', key: `log:${ev.id}`, id: ev.id, t: ev.t, level: ev.level, text: ev.text };
       return { ...d, timeline: cap([...d.timeline, item]) };
     }

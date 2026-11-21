@@ -2,6 +2,7 @@
 
     elrobot up            Station + daemon (the normal way to run everything)
     elrobot up --sim      daemon only, with simulated servos (no hardware)
+    elrobot up --lan      also serve other machines on the network (with an access key)
     elrobot daemon        just the daemon (expects a Station already running)
     elrobot station       just the NormaCore Station
     elrobot call <tool> [json-args]     call a tool on the running daemon, e.g. `elrobot call home`
@@ -55,12 +56,36 @@ def start_station(cfg: Config) -> subprocess.Popen | None:
     sys.exit("Station did not start listening; see logs/station.log")
 
 
+def _lan_addresses() -> list[str]:
+    """This machine's addresses as others on the network see it (best effort, nothing is sent)."""
+    out = []
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect(("10.255.255.255", 1))
+            out.append(s.getsockname()[0])
+        except OSError:
+            pass
+    host = socket.gethostname()
+    out.append(host if host.endswith(".local") else host + ".local")
+    return out
+
+
 def run_daemon(cfg: Config) -> None:
+    import secrets
+
     import uvicorn
 
     from .daemon import create_app
 
     print(f"daemon on http://{cfg.host}:{cfg.port}  ({'SIMULATED arm' if cfg.sim else 'real arm via Station ' + cfg.station_host})")
+    if cfg.host not in ("127.0.0.1", "localhost", "::1"):
+        if not cfg.access_key:
+            cfg.access_key = secrets.token_urlsafe(6)
+        print("shared on the network; other machines need the access key (this one does not):")
+        for addr in _lan_addresses():
+            print(f"    http://{addr}:{cfg.port}/?key={cfg.access_key}")
+        print(f"    scripts elsewhere: ELROBOT_DAEMON=http://<address>:{cfg.port} ELROBOT_KEY={cfg.access_key}")
+    sys.stdout.flush()
     uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, log_level="warning")
 
 
@@ -71,7 +96,8 @@ def call(cfg: Config, tool: str, args_json: str | None) -> int:
 
     args = json.loads(args_json) if args_json else {}
     try:
-        r = httpx.post(f"http://{cfg.host}:{cfg.port}/api/tools/{tool}", json={"args": args, "source": "cli"}, timeout=180)
+        host = "127.0.0.1" if cfg.host == "0.0.0.0" else cfg.host
+        r = httpx.post(f"http://{host}:{cfg.port}/api/tools/{tool}", json={"args": args, "source": "cli"}, timeout=180)
     except httpx.ConnectError:
         print("daemon is not running (start it with `elrobot up`)")
         return 2
@@ -95,6 +121,7 @@ def main() -> None:
         p.add_argument("--sim", action="store_true", help="simulated servos, no hardware")
         p.add_argument("--no-voice", action="store_true", help="do not start the conversational agent")
         p.add_argument("--port", type=int)
+        p.add_argument("--lan", action="store_true", help="listen on all interfaces so other machines can connect (needs the access key)")
         p.add_argument("-v", "--verbose", action="store_true")
     sub.add_parser("station")
     p = sub.add_parser("call")
@@ -122,6 +149,8 @@ def main() -> None:
         cfg.voice = False
     if a.port:
         cfg.port = a.port
+    if a.lan:
+        cfg.host = "0.0.0.0"
     station = start_station(cfg) if (a.cmd == "up" and not cfg.sim) else None
     try:
         run_daemon(cfg)
