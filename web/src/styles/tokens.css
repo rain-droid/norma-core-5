@@ -1,0 +1,127 @@
+/*
+ * Design tokens.
+ *
+ * The world is blueprint blue, the robot is signal yellow, and everything a
+ * person has to read sits in dark ink on white paper or white on ink. Red is
+ * reserved for the stop button and for things that went wrong.
+ */
+:root {
+  --blue-deep: #111c74;
+  --blue-shade: #1b2fb2;
+  --blue: #2443d8;
+  --blue-mat: #2f52ea;
+
+  --paper: #f6f8fd;
+  --paper-dim: #e4e9f7;
+  --ink: #0b1240;
+  --ink-soft: #454e80;
+  --chalk: #e3ebff;
+  --chalk-dim: rgba(227, 235, 255, 0.66);
+
+  --yellow: #ffc916;
+  --yellow-deep: #e2a600;
+  --red: #e8261c;
+  --red-deep: #b3150d;
+
+  --hairline: rgba(11, 18, 64, 0.13);
+  --glass: rgba(9, 15, 62, 0.72);
+
+  --font-display: 'Anybody Variable', 'Arial Black', system-ui, sans-serif;
+  --font-text: 'Overpass Variable', 'Helvetica Neue', system-ui, sans-serif;
+
+  /* Type scale (rem). The root size grows with the screen, so the whole
+     interface scales up for a projector instead of shrinking into a corner. */
+  --t-micro: 0.72rem;
+  --t-small: 0.84rem;
+  --t-body: 1rem;
+  --t-chat: 1.09rem;
+  --t-large: 1.32rem;
+  --t-display: 2rem;
+
+  --r-s: 0.5rem;
+  --r-m: 0.8rem;
+  --r-l: 1.15rem;
+  --r-xl: 1.7rem;
+
+  --col-left: 23.5rem;
+  --col-right: 20.5rem;
+  --gap: 0.8rem;
+  --edge: 1rem;
+
+  --lift: 0 0.5rem 1.6rem rgba(6, 12, 70, 0.34), 0 0.1rem 0.3rem rgba(6, 12, 70, 0.3);
+  --snap: cubic-bezier(0.3, 1.45, 0.5, 1);
+}
+
+html {
+  font-size: clamp(13.5px, 0.52vw + 0.42vh + 3.6px, 30px);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% 38%, var(--blue) 0%, var(--blue-shade) 58%, var(--blue-deep) 100%);
+  color: var(--ink);
+  font-family: var(--font-text);
+  font-size: var(--t-body);
+  font-weight: 500;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 0;
+  background: none;
+  padding: 0;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 0.19rem solid var(--yellow);
+  outline-offset: 0.16rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001s !important;
+  }
+}

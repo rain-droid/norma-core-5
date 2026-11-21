@@ -1,0 +1,20 @@
+# reference clones (read-only research material, not part of this repo)
+refs/
+# runtime
+logs/
+station/station_data/
+bin/
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+# web
+web/node_modules/
+web/dist/
+# models + generated audio
+models/
+.cache/
+data/audio/
+.pytest_cache/
+.ruff_cache/

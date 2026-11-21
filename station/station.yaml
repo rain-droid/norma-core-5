@@ -1,0 +1,28 @@
+# NormaCore Station config for one ElRobot follower + its wrist camera.
+# Station auto-discovers the servo bus (USB 1a86:55d3) and any external UVC camera.
+drivers:
+  st3215:
+    enabled: true
+    current-threshold: 100
+    deadband: 20
+  vesc-trampa:
+    enabled: false
+    port-baud-rate: 115200
+  system-info: true
+  usb-video:
+    enabled: true
+    # shortest side of the JPEGs the Station stores; 224 (default) is too small for detection
+    resize_target: 480
+    # without preferences the Station picks the lowest resolution mode (these cameras expose 420v/yuvs on macOS, no MJPEG)
+    formats:
+      - format: "1280x720@30fps,420v"
+      - format: "640x480@30fps,420v"
+    # keep 1 of every 2 frames (~15 fps) to limit disk churn in the frame queue
+    frame-skip: 1
+inference:
+- queue-id: inference/normvla
+  shm: /tmp/normvla
+  shm-size-mb: 12
+  format: normvla
+  st3215-bus: auto
+  update-interval: 100ms

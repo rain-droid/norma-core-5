@@ -1,0 +1,7 @@
+# Local hardware setup. See src/elrobot/config.py for every key and its default.
+
+# The two "KD-USB Cameras" are identical models; these ids encode the USB port each is on.
+# If you replug them into different ports, run `uv run python scripts/probe.py` and swap.
+cameras:
+  "0x1312402c7f4a60": wrist
+  "0x1312202c7f4a60": top

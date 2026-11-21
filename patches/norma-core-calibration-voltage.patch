@@ -1,0 +1,74 @@
+diff --git a/software/drivers/st3215/src/auto_calibrate/calibrator.rs b/software/drivers/st3215/src/auto_calibrate/calibrator.rs
+index 14dc301..1b079a9 100644
+--- a/software/drivers/st3215/src/auto_calibrate/calibrator.rs
++++ b/software/drivers/st3215/src/auto_calibrate/calibrator.rs
+@@ -483,16 +483,34 @@ impl ST3215Calibrator {
+         self.send_eeprom_write_verified(motor_id, EepromRegister::DCoef.address(), vec![pid.d]).await?;
+         self.send_eeprom_write_verified(motor_id, EepromRegister::ReturnDelay.address(), vec![0]).await?;
+ 
+-        info!("Motor {} - Setting RAM parameters", motor_id);
++        let decivolts = self.read_supply_decivolts(motor_id);
++        let torque_limit = calibration_torque_limit(decivolts);
++        info!(
++            "Motor {} - Setting RAM parameters (supply {:.1} V, torque limit {})",
++            motor_id, decivolts as f32 / 10.0, torque_limit
++        );
+         self.send_write_verified(motor_id, RamRegister::TorqueEnable.address(), vec![0]).await?;
+-        self.send_eeprom_write_verified(motor_id, EepromRegister::MaxTorque.address(), CALIBRATION_TORQUE_LIMIT.to_le_bytes().to_vec()).await?;
++        self.send_eeprom_write_verified(motor_id, EepromRegister::MaxTorque.address(), torque_limit.to_le_bytes().to_vec()).await?;
+         self.send_write_verified(motor_id, RamRegister::GoalSpeed.address(), CALIBRATION_SPEED.to_le_bytes().to_vec()).await?;
+         self.send_write_verified(motor_id, RamRegister::Acc.address(), vec![CALIBRATION_ACCEL]).await?;
+-        self.send_write_verified(motor_id, RamRegister::TorqueLimit.address(), CALIBRATION_TORQUE_LIMIT.to_le_bytes().to_vec()).await?;
++        self.send_write_verified(motor_id, RamRegister::TorqueLimit.address(), torque_limit.to_le_bytes().to_vec()).await?;
+ 
+         Ok(())
+     }
+ 
++    /// Supply voltage the servo last reported, in 0.1 V. 0 if no state has arrived yet.
++    fn read_supply_decivolts(&self, motor_id: u8) -> u8 {
++        let state = self.inference_rx.borrow();
++        let addr = RamRegister::PresentVoltage.address() as usize;
++        state
++            .buses
++            .iter()
++            .find(|b| b.bus.as_ref().map(|bus| bus.serial_number.as_str()) == Some(self.target_bus_serial.as_str()))
++            .and_then(|bus| bus.motors.iter().find(|m| m.id == motor_id as u32))
++            .and_then(|motor| motor.state.get(addr).copied())
++            .unwrap_or(0)
++    }
++
+     pub async fn cleanup_motor(&mut self, motor_id: u8) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+         self.send_eeprom_write(motor_id, EepromRegister::MaxTorque.address(), DEFAULT_MAX_TORQUE.to_le_bytes().to_vec()).await?;
+         self.send_eeprom_write(motor_id, EepromRegister::ProtectionCurrent.address(), DEFAULT_PROTECTION_CURRENT.to_le_bytes().to_vec()).await?;
+diff --git a/software/drivers/st3215/src/presets.rs b/software/drivers/st3215/src/presets.rs
+index 37dfe0b..a6224d4 100644
+--- a/software/drivers/st3215/src/presets.rs
++++ b/software/drivers/st3215/src/presets.rs
+@@ -54,3 +54,27 @@ pub const CALIBRATION_ACCEL: u8 = 50;
+ 
+ /// Torque limit during calibration
+ pub const CALIBRATION_TORQUE_LIMIT: u16 = 300;
++
++/// Supply voltage (in 0.1 V) that `CALIBRATION_TORQUE_LIMIT` was tuned for.
++pub const CALIBRATION_REFERENCE_DECIVOLTS: f32 = 120.0;
++
++/// Torque limit to use during calibration for a servo reporting `decivolts` of supply.
++///
++/// The torque limit register caps PWM duty, so the force it allows scales with supply voltage.
++/// On a 7.4 V supply the stock limit gives about 60% of the force it gives at 12 V, which is not
++/// enough for the shoulder to lift the arm: the sweep stalls against gravity and records the
++/// table as a joint limit. Scaling the limit keeps the force at what the routine was tuned for.
++/// `ST3215_CALIBRATION_TORQUE_LIMIT` overrides the result.
++pub fn calibration_torque_limit(decivolts: u8) -> u16 {
++    if let Some(v) = std::env::var("ST3215_CALIBRATION_TORQUE_LIMIT")
++        .ok()
++        .and_then(|v| v.parse::<u16>().ok())
++    {
++        return v.clamp(50, 1000);
++    }
++    if decivolts == 0 {
++        return CALIBRATION_TORQUE_LIMIT;
++    }
++    let scaled = CALIBRATION_TORQUE_LIMIT as f32 * CALIBRATION_REFERENCE_DECIVOLTS / decivolts as f32;
++    (scaled.round() as u16).clamp(CALIBRATION_TORQUE_LIMIT, 600)
++}

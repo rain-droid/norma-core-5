@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "elrobot": {
+      "command": "uv",
+      "args": ["run", "elrobot-mcp"]
+    }
+  }
+}
