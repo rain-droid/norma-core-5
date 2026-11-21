@@ -77,13 +77,13 @@ async def pick_at(ctx, x: float, y: float, yaw: float | None = None, grasp_heigh
     grip = await robot.grasp()
     if not grip["holding"]:
         await robot.set_gripper(1.0, label="opening")
-        await robot.move_path(robot.plan_linear(robot._plan_start(), hover_pos, approach=approach, allow_low=True), speed=0.7, label="backing off")
+        await robot.move_path(path[::-1], speed=0.7, label="backing off")
         raise RobotError(
             f"closed on nothing at x={target[0]:+.3f} y={target[1]:+.3f}: the jaws shut completely. "
             "The object is not there; look again (look_at_table, find_objects) before retrying."
         )
     # back out to the hover point: known reachable, unlike a taller vertical lift at the edge of reach
-    await robot.move_path(robot.plan_linear(robot._plan_start(), hover_pos, approach=approach, allow_low=True), speed=0.6, label="lifting")
+    await robot.move_path(path[::-1], speed=0.6, label="lifting")
     await asyncio.sleep(0.25)
     if not robot.still_holding():
         raise RobotError("had it, but it slipped out while lifting; look again to see where it ended up")
