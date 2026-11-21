@@ -29,6 +29,8 @@ class Config:
     assets_dir: Path = REPO_ROOT / "assets"
     web_dist: Path = REPO_ROOT / "web/dist"
     data_dir: Path = REPO_ROOT / "data"
+    # RoboHarness-style agent workspace: tools, skills, live perception and call history as files.
+    workspace_dir: Path = REPO_ROOT / "workspace"
 
     # --- workspace
     table_z: float = 0.0  # table height in the base frame (base sits on the table)

@@ -113,6 +113,9 @@ class Robot:
         self.source: str | None = None
         # Called with (path_points, target) whenever a motion is planned; path [] clears.
         self.on_plan: Callable[[list, dict | None], None] | None = None
+        # Called with each command handed to the servos: {"joints": [7 rad], ...} for an arm
+        # trajectory's end point, {"gripper": 0..1} for the jaws.
+        self.on_command: Callable[[dict], None] | None = None
 
     # ================================================================== state
 
@@ -506,6 +509,8 @@ class Robot:
 
     async def _execute(self, path: np.ndarray, speed: float, guard: ContactGuard | None) -> MoveResult:
         speed = min(2.0, max(0.05, speed))
+        if self.on_command is not None:
+            self.on_command({"joints": [round(float(v), 5) for v in path[-1]], "waypoints": len(path), "speed": speed, "guarded": guard is not None})
         traj = Trajectory.through(path, self.cfg.max_joint_speed * speed, self.cfg.max_joint_accel * min(1.5, max(0.3, speed)))
         return await self._run(traj, guard=guard)
 
@@ -582,6 +587,8 @@ class Robot:
             try:
                 open_frac = min(1.0, max(0.0, float(open_frac)))
                 await self.link.write_goals({GRIPPER_ID: self._gripper_tick(open_frac)})
+                if self.on_command is not None:
+                    self.on_command({"gripper": open_frac})
                 self._grip_goal = open_frac
                 reached = await self._gripper_wait()
                 if open_frac > 0.5:
@@ -602,6 +609,8 @@ class Robot:
             try:
                 closed_tick = self._gripper_tick(0.0)
                 await self.link.write_goals({GRIPPER_ID: closed_tick})
+                if self.on_command is not None:
+                    self.on_command({"gripper": 0.0, "until_stall": True})
                 reached = await self._gripper_wait(timeout=3.0)
                 self.holding = reached > self.cfg.holding_min_open
                 if self.holding:

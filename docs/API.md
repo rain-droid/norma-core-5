@@ -128,3 +128,13 @@ Tools the UI calls directly (stable names): `home`, `rest`, `stop`, `gesture` (`
   then treats the text exactly like `/api/chat` with `via: "voice"`. Empty or noise-only audio
   returns `{"text": "", "turn_id": null}` and starts no turn.
 - `GET /api/voice/audio/{id}.wav` → audio for a `speech` event.
+
+### Agent workspace (`workspace/`, branch idea-1-arav)
+
+- `POST /api/workspace/tools/{name}` with `{"args": {...}, "source": "agent"}` imports
+  `workspace/tools/{name}.py` (re-imported when any file under `workspace/tools/` changes) and
+  runs its `async def {name}(ctx, ...)`. Returns the tool's own dict plus `history`, `images`,
+  `joint_command_count`, `duration_s`; failures carry `error` and `error_kind` instead of raising.
+  Emits the same `tool_start` / `tool_end` events as `/api/tools`, and shares its motion lock.
+- `GET /api/workspace` → `{"root": "...", "tools": ["pick_at", ...]}`.
+- While the daemon runs it rewrites `workspace/perception/` at 2 Hz.

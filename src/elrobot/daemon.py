@@ -27,6 +27,7 @@ from .kinematics import Kinematics
 from .link import Link, SimLink, StationLink
 from .robot import Robot, RobotError, Stopped
 from .skills import GESTURES, Skills
+from .workspace import Workspace
 
 log = logging.getLogger("elrobot.daemon")
 
@@ -46,6 +47,11 @@ class Hub:
         self._task_lock = asyncio.Lock()  # one motion tool at a time
         self._current_call: str | None = None
         self.voice = None
+        self.workspace = Workspace(self, cfg.workspace_dir) if cfg.workspace_dir.is_dir() else None
+        if isinstance(self.link, SimLink):
+            from .simworld import SimWorld
+
+            SimWorld(self.robot, self.skills.cam).attach(self.link)
 
     def _make_link(self) -> Link:
         cfg = self.cfg
@@ -185,6 +191,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         await hub.link.start()
         tasks = [asyncio.create_task(state_loop()), asyncio.create_task(health_loop())]
+        if hub.workspace is not None:
+            tasks.append(asyncio.create_task(hub.workspace.publish_loop()))
         if hub.voice is not None:
             tasks.append(asyncio.create_task(_start_voice(hub)))
         yield
@@ -266,6 +274,22 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         except Exception:
             body = {}
         return JSONResponse(await hub.call_tool(name, body.get("args") or {}, body.get("source") or "api"))
+
+    @app.get("/api/workspace")
+    async def workspace_info():
+        if hub.workspace is None:
+            raise HTTPException(404, f"no workspace at {cfg.workspace_dir}")
+        return {"root": str(hub.workspace.root), "tools": hub.workspace.names()}
+
+    @app.post("/api/workspace/tools/{name}")
+    async def run_workspace_tool(name: str, request: Request):
+        if hub.workspace is None:
+            raise HTTPException(404, f"no workspace at {cfg.workspace_dir}")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        return JSONResponse(await hub.workspace.call(name, body.get("args") or {}, body.get("source") or "agent"))
 
     @app.post("/api/stop")
     async def stop():
