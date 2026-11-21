@@ -129,12 +129,24 @@ Tools the UI calls directly (stable names): `home`, `rest`, `stop`, `gesture` (`
   returns `{"text": "", "turn_id": null}` and starts no turn.
 - `GET /api/voice/audio/{id}.wav` → audio for a `speech` event.
 
-### Agent workspace (`workspace/`, branch idea-1-arav)
+### Agent workspace (`workspace/`): joint commands only
 
-- `POST /api/workspace/tools/{name}` with `{"args": {...}, "source": "agent"}` imports
-  `workspace/tools/{name}.py` (re-imported when any file under `workspace/tools/` changes) and
-  runs its `async def {name}(ctx, ...)`. Returns the tool's own dict plus `history`, `images`,
-  `joint_command_count`, `duration_s`; failures carry `error` and `error_kind` instead of raising.
-  Emits the same `tool_start` / `tool_end` events as `/api/tools`, and shares its motion lock.
-- `GET /api/workspace` → `{"root": "...", "tools": ["pick_at", ...]}`.
-- While the daemon runs it rewrites `workspace/perception/` at 2 Hz.
+The workspace's tools run in the agent's own shell. This is all they can ask of the arm:
+
+- `POST /api/joints` with `{"path": [[q1..q7], ...], "gripper": 0..1, "speed": 0.8, "check": true,
+  "allow_low": false, "label": "...", "source": "agent", "call_id": "..."}`. `path` is one or more
+  waypoints of seven joint angles in radians, travelled as one move; `gripper` is applied after
+  the arm arrives, and 0 closes until the jaws stall. Either may be left out. Blocks until done.
+  Returns `{"ok": true, "joints": [7 measured], "gripper": {...}, "tcp": {...}}` or
+  `{"ok": false, "error": "...", "kind": "invalid" | "busy" | "robot" | "stopped"}`.
+  Refused outside the calibrated joint limits, outside the clearance envelope unless
+  `check` is false (`allow_low` lets the fingertips reach the table surface), and while any
+  servo reports a fault. Shares the one-motion-at-a-time lock with `/api/tools`.
+  A command without `call_id` shows on the timeline as a `joint_command` entry of its own.
+- `POST /api/event` with `{"kind": "tool_start" | "tool_end" | "markers" | "detections" | "log", ...}`
+  puts an event on the stream, so tool calls made in the workspace show in the web UI. Display only.
+- `GET /api/meta` also carries `clearance` (`floor`, `body`, `min_y`, `limit_margin`): the envelope
+  joint commands are held to, for whoever plans them.
+- While the daemon runs it rewrites `workspace/perception/` at 2 Hz and after every joint command.
+  With `--sim` it also writes the simulated top camera's calibration to
+  `workspace/robot_config/camera_top.sim.json`.

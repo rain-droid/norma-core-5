@@ -1,16 +1,15 @@
 """Halt all motion now and hold position. Always allowed, even while another tool is running.
 
-The running tool ends with a `stopped` error. Torque stays on, so the arm does not drop.
+The joint command in progress ends with a `stopped` error. Torque stays on, so the arm does not drop.
 """
 
 from util.motion import tcp_report
 
-MOTION = False
 
-
-async def stop(ctx) -> dict:
-    await ctx.robot.stop()
-    return {"stopped": True, "tcp": tcp_report(ctx) if ctx.robot.ready else None}
+def stop(ctx) -> dict:
+    ctx.arm.stop()
+    state = ctx.arm.state()
+    return {"stopped": True, "tcp": tcp_report(state["ee"], state["gripper"]) if state["ee"] else None}
 
 
 if __name__ == "__main__":

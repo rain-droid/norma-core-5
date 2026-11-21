@@ -8,11 +8,11 @@ the base; straight-down poses only exist within about 0.27 m.
 the most vertical approach that reaches is used (tries 90, 75, 60, 45, 30, 15). `yaw` rotates
 the jaws about the pointing direction, degrees (0 = jaws close left-right).
 
-How it gets there: inverse kinematics picks joint angles for the pose, then one joint-space
-move goes there, the same motion joint_command makes. The tool therefore sweeps an arc, not a
-line. `straight: true` instead solves IK every 8 mm along the straight segment and follows
-those waypoints, holding the gripper's direction; use it for approach and retreat near objects.
-Poses that would put the fingertips within 8 mm of the table are refused unless `allow_low`.
+How it gets there: inverse kinematics (util/planning.py) turns the pose into joint angles, and
+one joint command goes there, so the tool sweeps an arc, not a line. `straight: true` instead
+plans a waypoint every 8 mm along the straight segment, keeping the gripper's direction, and
+sends them as one command; use it for approach and retreat near objects. Poses that put the
+fingertips within 8 mm of the table are refused unless `allow_low`.
 
 Returns where the tool measurably ended up and how far that is from the target.
 """
@@ -20,30 +20,27 @@ Returns where the tool measurably ended up and how far that is from the target.
 import numpy as np
 
 from elrobot.kinematics import approach_from_pitch
-from elrobot.robot import RobotError
+from util.arm import RobotError
 from util.motion import require_ready, tcp_report
 
 
-async def move_tcp(ctx, x: float, y: float, z: float, pitch: float | None = None, yaw: float | None = None,
-                   straight: bool = False, speed: float = 0.8, allow_low: bool = False) -> dict:  # fmt: skip
-    robot = ctx.robot
-    require_ready(ctx)
-    pos = np.array([x, y, z], dtype=float)
-    start = robot._plan_start()
+def move_tcp(ctx, x: float, y: float, z: float, pitch: float | None = None, yaw: float | None = None,
+             straight: bool = False, speed: float = 0.8, allow_low: bool = False) -> dict:  # fmt: skip
+    require_ready(ctx, awake=True)
+    plan, pos, start = ctx.plan, np.array([x, y, z], dtype=float), ctx.arm.q()
     if straight:
         approach = approach_from_pitch(pos[:2], pitch) if pitch is not None else None
-        path = robot.plan_linear(start, pos, approach=approach, allow_low=allow_low)
-        await robot.move_path(path, speed=speed, target={"pos": pos.tolist(), "approach": robot.kin.fk(path[-1])[:3, 2].tolist()})
-        used = pitch
+        target, used = plan.line(start, pos, approach=approach, allow_low=allow_low), pitch
     else:
         if pitch is None:
-            solution, used = robot.solve_reach(pos, yaw=yaw, allow_low=allow_low)
+            solution, used = plan.reach(pos, yaw=yaw, q_seed=start, allow_low=allow_low)
         else:
-            solution, used = robot.solve(pos, pitch=pitch, yaw=yaw, allow_low=allow_low), pitch
+            solution, used = plan.solve(pos, pitch=pitch, yaw=yaw, q_seed=start, allow_low=allow_low), pitch
         if not solution.ok:
-            raise RobotError(robot._unreachable(pos, solution))
-        await robot.move_joints(solution.q, speed=speed, allow_low=allow_low)
-    report = tcp_report(ctx)
+            raise RobotError(plan.unreachable(pos, solution))
+        target = solution.q
+    res = ctx.arm.joints(target, speed=speed, allow_low=allow_low, label="moving straight" if straight else "moving")
+    report = tcp_report(res["tcp"], res["gripper"])
     return {
         "target_xyz_m": [round(float(v), 4) for v in pos],
         "tcp": report,

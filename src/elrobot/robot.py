@@ -240,7 +240,7 @@ class Robot:
             )  # fmt: skip
         if calibrated:
             g = self.gripper_open()
-            out["gripper"] = {"open": round(g, 3), "width_mm": round(g * GRIPPER_MAX_WIDTH * 1000, 1), "holding": self.holding}
+            out["gripper"] = {"open": round(g, 3), "width_mm": round(g * GRIPPER_MAX_WIDTH * 1000, 1), "holding": self.still_holding()}
             T = self.kin.fk(self.q())
             out["ee"] = {
                 "pos": [round(float(v), 4) for v in T[:3, 3]],
@@ -254,17 +254,7 @@ class Robot:
     def check_config(self, q, *, allow_low: bool = False) -> str | None:
         """Why this arm configuration is not allowed, or None if it is fine."""
         c = self.cfg
-        g = self.kin.geometry(q)
-        floor = c.table_z + (0.0 if allow_low else c.floor_clearance)
-        low = float(min(g.tips[:, 2].min(), g.tcp[2]))
-        if low < floor - 1e-6:
-            return f"fingertips would be {1000 * (floor - low):.0f} mm into the table"
-        body = np.vstack([g.joints[2:], g.wrist[None], g.extras]) if len(g.extras) else np.vstack([g.joints[2:], g.wrist[None]])
-        if float(body[:, 2].min()) < c.table_z + c.body_clearance:
-            return "the arm body would hit the table"
-        if float(g.tcp[1]) < c.min_y or float(g.wrist[1]) < c.min_y:
-            return "that is behind the robot, off the table"
-        return self.kin.self_collision(q)
+        return self.kin.clearance(q, table_z=c.table_z, floor=0.0 if allow_low else c.floor_clearance, body=c.body_clearance, min_y=c.min_y)
 
     def check_path(self, path, *, allow_low: bool = False) -> str | None:
         for q in path:

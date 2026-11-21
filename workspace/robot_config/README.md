@@ -13,8 +13,11 @@ arm reaches a half-disc of about 0.38 m; straight-down poses exist within about 
 
 ## Joints: the one hard contract
 
-A command is seven absolute angles in radians, servos 1..7, plus a jaw opening 0..1.
-`tools/joint_command.py` sends exactly that; `control.py` is the same thing from Python.
+The robot takes joint commands and nothing else. A command is one or more waypoints of seven
+absolute angles in radians (servos 1..7), and/or a jaw opening 0..1. `tools/joint_command.py`
+sends exactly that; `control.py` is the same thing from Python; `tools/util/arm.py` is the
+few lines that carry it, and says what the robot side does with it. Every other tool is a way
+of working out which joint angles to send.
 
 | Servo | Meaning | URDF limits (deg) | +10 deg from the ready pose moves the tool point |
 |---|---|---|---|
@@ -34,12 +37,19 @@ arm in the same vertical plane, which is why one tool position has many joint so
 
 ## Cameras
 
+`top` is fixed across the table from the robot, about 39 cm above the mat, looking back at
+the arm, so the robot's right is on the left of its image. It is the camera to measure with.
+`camera_top.json` holds its calibration, written by `tools/calibrate_top.py` from the four
+AprilTags at the mat's corners: the mapping from a pixel to the mat surface, where the camera
+stands (which extends that to points at a known height), and `base_in_mat`, where the robot's
+base sits on the mat. That last one was tuned by eye; if picks land consistently off in one
+direction, it is the number to correct. In simulation the file is `camera_top.sim.json`,
+written exact by the simulator.
+
 `wrist` rides on the gripper and looks along it; the black shapes at the bottom of its image
-are the jaws. Its model (intrinsics and mounting) is `../data/camera_wrist.json` if that file
-exists, otherwise a rough default: results then carry `camera_calibrated: false` and table
-positions can be off by a centimetre or more. `pick_at` absorbs that by looking again from close
-up. `top` is fixed above the table for overview; it has no model, so its pixels cannot be turned
-into positions.
+are the jaws. Its model (lens and mounting) is `camera_wrist.json` if someone has calibrated
+it, otherwise a rough default that reads about 3 cm off on the real arm. Use it to look
+closely and to check a grasp, not to measure.
 
 ## The servos
 
@@ -53,12 +63,16 @@ and reports status 32 until its torque is switched off and on, and the joint sag
 threshold is stored in each servo. It is 60 % on the arm joints (`../scripts/servo_overload.py`
 shows and sets it); the Station's calibration puts it back to 25 %, which the shoulder exceeds
 on most lifts. Holding the arm stretched out keeps the shoulder near 35-45 %: go `home` or
-`rest` between tasks. A tool refuses to start while any servo reports a fault.
+`rest` between tasks. The robot side refuses joint commands while any servo reports a fault.
 
 Moves follow a trapezoidal speed profile. The servos trail a moving setpoint, more the faster it
 moves, and a joint more than 12.6 degrees behind for half a second counts as blocked. Unfolding
 from the resting pose is the heaviest move: at speed 0.5 the upper elbow trails by about 9.5
 degrees, which is why `home` defaults to that speed. Faster has been refused as blocked.
 
-Inverse kinematics is pink (Pinocchio): `../src/elrobot/kinematics.py`, `ik` for a pose and
-`ik_line` for straight lines.
+## Kinematics
+
+`tools/util/planning.py` turns tool poses into joint angles: `solve` for one pose, `line` for
+a straight path, `approach_for` for a grasp. The solver underneath is pink (Pinocchio), in the
+arm's kinematics library at `../../src/elrobot/kinematics.py`; the robot side uses the same
+library for its clearance check, so change your copy of the planning, not that file.

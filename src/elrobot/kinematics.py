@@ -289,6 +289,21 @@ class Kinematics:
                 return f"{self._PART_NAMES[b]} would hit the {self._PART_NAMES[a]}"
         return None
 
+    def clearance(self, q, *, table_z: float, floor: float, body: float, min_y: float) -> str | None:
+        """Why this configuration is not allowed, or None if it is fine: the fingertips at least
+        `floor` above the table, the arm's own joints at least `body` above it, nothing further
+        back than `min_y`, and no part of the arm touching another."""
+        g = self.geometry(q)
+        low = float(min(g.tips[:, 2].min(), g.tcp[2]))
+        if low < table_z + floor - 1e-6:
+            return f"fingertips would be {1000 * (table_z + floor - low):.0f} mm into the table"
+        parts = np.vstack([g.joints[2:], g.wrist[None], g.extras]) if len(g.extras) else np.vstack([g.joints[2:], g.wrist[None]])
+        if float(parts[:, 2].min()) < table_z + body:
+            return "the arm body would hit the table"
+        if float(g.tcp[1]) < min_y or float(g.wrist[1]) < min_y:
+            return "that is behind the robot, off the table"
+        return self.self_collision(q)
+
     # ------------------------------------------------------------------ limits
 
     def set_limits(self, lower, upper) -> None:
