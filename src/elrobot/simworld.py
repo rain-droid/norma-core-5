@@ -60,6 +60,7 @@ class SimWorld:
             Block("green block", np.array([0.0, 0.28]), (0.045, 0.022), 0.022, (80, 180, 70)),
         ]
         self.held: Block | None = None
+        self.hand: Block | None = None  # something large to draw reaching in over the table's edge; cannot be grasped
         self._held_dz = 0.0
         self._seq = 0
 
@@ -112,7 +113,7 @@ class SimWorld:
         on_table = (rays[..., 2] < -1e-6) & (hit[..., 0] > TABLE_X[0]) & (hit[..., 0] < TABLE_X[1]) & (hit[..., 1] > TABLE_Y[0]) & (hit[..., 1] < TABLE_Y[1])
         img = np.where(on_table[..., None], np.array(TABLE_BGR, np.uint8), np.array(ROOM_BGR, np.uint8)).astype(np.uint8)
         eye = T[:3, 3]
-        for b in sorted(self.blocks, key=lambda b: -np.linalg.norm(np.array([*b.xy, b.z]) - eye)):
+        for b in sorted([*self.blocks, *([self.hand] if self.hand else [])], key=lambda b: -np.linalg.norm(np.array([*b.xy, b.z]) - eye)):
             px = [cam.project(c, T_base_tool) for c in b.corners(self.table_z)]
             if any(p is None for p in px):
                 continue

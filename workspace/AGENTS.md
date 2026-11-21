@@ -14,7 +14,7 @@ around it and send joint angles yourself.
 |---|---|
 | `robot_config/` | The body: URDF and meshes, a picture of what each joint does (`visuals/`), frames, camera calibration, and `control.py`, the raw joint interface. Read `robot_config/README.md` first. |
 | `tools/` | One Python file per tool: its whole algorithm and its own command. `tools/util/` is the shared code: `arm.py` is the contract with the robot, `planning.py` and `kinematics.py` the IK. |
-| `perception/` | The live senses, rewritten twice a second and after every command: `latest.json`, `exteroception/{top,wrist}/rgb.jpg`, `proprioception/state.json`. |
+| `perception/` | The live senses, rewritten twice a second and after every command: `latest.json`, `exteroception/{top,wrist}/rgb.jpg`, `proprioception/state.json`. While the tracker runs, also `exteroception/tracks.json`: every object on the table by name, ten times a second. |
 | `skills/` | Task procedures in Markdown, written from experience with this arm. Take up the one that fits before starting (`activate_skill`). |
 | `tool_call_history/` | One folder per call: `input.json`, `result.json`, `joint_commands.jsonl` (every command sent), images. |
 
@@ -29,7 +29,7 @@ kinematics. The robot is a separate process that it talks to over local HTTP.
 
 ```bash
 pixi run python tools/find_objects.py '{}'
-pixi run python tools/pick_at.py '{"x": 0.07, "y": 0.20, "yaw_deg": 0}'
+pixi run python tools/pick_object.py '{"object": "red-1"}'
 pixi run python tools/move_tcp.py --schema        # signature and full description
 ```
 
@@ -40,21 +40,30 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Purpose | Tools | Moves the arm |
 |---|---|---|
 | See | `capture_camera`, `find_objects`, `read_proprioception`, `look_at_table` | only `look_at_table` |
+| Follow objects live | `track_objects` | no, but it stops the arm when a hand reaches in |
 | Pixel to position | `pixel_to_table` | no |
 | The contract itself | `joint_command`, or `robot_config/control.py` from Python | yes |
 | Move the tool point | `move_tcp`, `adjust_tcp` | yes |
 | Gripper | `open_gripper`, `close_gripper` | jaws only |
-| Whole manipulations | `pick_at`, `place_at` | yes |
+| Whole manipulations, by tracked name | `pick_object`, `place_object` | yes |
+| Whole manipulations, by position | `pick_at`, `place_at` | yes |
 | Poses and safety | `home`, `rest`, `stop` | `stop` always works |
 | Skills | `activate_skill`, `deactivate_skill` | no |
 
 A session usually goes: `activate_skill` for the task, `home` (wakes the arm and gets it out
-of the camera's way), `find_objects` and open its image, act, look again to confirm, and
-`rest` when you are done or waiting. Do not leave the arm stretched out: holding that is hard on the shoulder servo.
+of the camera's way), `track_objects` and open its image, `pick_object` and `place_object` by
+name, look again to confirm, and `rest` when you are done or waiting. Do not leave the arm
+stretched out: holding that is hard on the shoulder servo.
+
+`pick_object` and `place_object` read the tracker while they move: they aim again when the
+object has been moved, wait when a hand is in the work area, try again when a grasp comes up
+empty, and check with the camera where a placed object ended up. `pick_at` and `place_at` go
+to the numbers you give them and check nothing; use them for what the tracker cannot see.
 
 ## The tools are a ladder, not a fence
 
-`pick_at` is `planning.py` choosing joint angles and `arm.py` sending them, the same command
+`pick_object` is `pick_at` with the tracker's eyes; `pick_at` is `planning.py` choosing joint
+angles and `arm.py` sending them, the same command
 `joint_command` sends. When a tool does not do what the task needs: read it, call a lower
 one, edit it (the next call runs your version), or write your own. A new `tools/NAME.py`
 defining `def NAME(ctx, ...)` is a new tool; copy a short one such as `tools/open_gripper.py`.
@@ -88,6 +97,9 @@ on its behalf, but it only knows about the arm and the table, not about objects 
   the base, x to the robot's right, y forward, z up.
 - `check: false` and `allow_low: true` remove or loosen the robot side's clearance guard. Use
   them deliberately, with small steps, after `read_proprioception`.
-- If something looks wrong or a person reaches in, `tools/stop.py` first, think second.
+- If something looks wrong or a person reaches in, `tools/stop.py` first, think second. While
+  the tracker runs it does this by itself for anything large coming in over the left, right or
+  camera-side edge of the work area. It does not see what comes from behind the robot, a hand
+  the colour of the table, or anything outside the area the top camera searches.
 - When you learn something about this arm or this table that the next session should know,
   write it into the relevant skill or tool docstring.

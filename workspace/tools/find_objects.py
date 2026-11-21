@@ -181,36 +181,48 @@ def footprint(cam: capture.TopCamera, blob: vision.Blob, img: np.ndarray) -> dic
     return {"centre": mid + normal * width / 2, "jaw": face, "width": width, "sides": [width]}
 
 
-def from_top(ctx, img: np.ndarray, meta: dict, max_objects: int) -> tuple[list[dict], list[dict]]:
-    cam = capture.TopCamera(ctx.root, meta["mode"], meta["table_z"])
-    cam.to_pixel([0.0, 0.2, meta["table_z"]])  # fails with the reason if the calibration lacks the camera's position
+def table_blobs(ctx, cam: capture.TopCamera, img: np.ndarray, meta: dict, hide: np.ndarray | None = None) -> tuple[list[vision.Blob], np.ndarray, np.ndarray]:
+    """Whatever stands out in the searched part of the top view, largest first. Also returns
+    the mask of that part, and the mask of what hides the table: the arm, plus `hide`."""
     z = meta["table_z"]
     area = np.zeros(img.shape[:2], np.uint8)
     corners = [cam.to_pixel([x, y, z]) for x, y in ((SEARCH_X[0], SEARCH_Y[0]), (SEARCH_X[1], SEARCH_Y[0]), (SEARCH_X[1], SEARCH_Y[1]), (SEARCH_X[0], SEARCH_Y[1]))]
     cv2.fillConvexPoly(area, np.round(corners).astype(np.int32), 255)
-    ignore = (area == 0) | arm_mask(ctx, cam, img.shape, meta["joints_rad"])
-    objects, marks = [], []
-    for blob in vision.blobs_from_mask(stands_out(img, ~ignore), 120):
-        if len(objects) >= max_objects:
-            break
-        f = footprint(cam, blob, img)
-        if f is None:
-            continue
-        n = len(objects) + 1
-        centre_px = cam.to_pixel([*f["centre"], z])
-        objects.append({
-            "id": n,
-            "color": color_name(img, blob),
-            "x": round(float(f["centre"][0]), 3),
-            "y": round(float(f["centre"][1]), 3),
-            "yaw_deg": jaw_yaw(f["jaw"]),
-            "width_mm": round(f["width"] * 1000),
-            "footprint_mm": [round(s * 1000) for s in f["sides"]],
-            "height_mm": round(f["height"] * 1000) if "height" in f else None,
-            "pixel": [round(float(centre_px[0])), round(float(centre_px[1]))],
-        })  # fmt: skip
-        marks.append({"label": f"{n}", "polygon": blob.polygon, "point": [float(centre_px[0]), float(centre_px[1])], "box": list(blob.box)})
-    return objects, marks
+    covered = arm_mask(ctx, cam, img.shape, meta["joints_rad"])
+    if hide is not None:
+        covered |= hide
+    return vision.blobs_from_mask(stands_out(img, (area > 0) & ~covered), 120), area > 0, covered
+
+
+def describe(cam: capture.TopCamera, blob: vision.Blob, img: np.ndarray, label) -> tuple[dict, dict] | None:
+    """One outline as an object (where it stands, how to grasp it) and as a mark to draw."""
+    f = footprint(cam, blob, img)
+    if f is None:
+        return None
+    centre_px = cam.to_pixel([*f["centre"], cam.table_z])
+    thing = {
+        "id": label,
+        "color": color_name(img, blob),
+        "x": round(float(f["centre"][0]), 3),
+        "y": round(float(f["centre"][1]), 3),
+        "yaw_deg": jaw_yaw(f["jaw"]),
+        "width_mm": round(f["width"] * 1000),
+        "footprint_mm": [round(s * 1000) for s in f["sides"]],
+        "height_mm": round(f["height"] * 1000) if "height" in f else None,
+        "pixel": [round(float(centre_px[0])), round(float(centre_px[1]))],
+    }  # fmt: skip
+    return thing, {"label": f"{label}", "polygon": blob.polygon, "point": [float(centre_px[0]), float(centre_px[1])], "box": list(blob.box)}
+
+
+def from_top(ctx, img: np.ndarray, meta: dict, max_objects: int) -> tuple[list[dict], list[dict]]:
+    cam = capture.TopCamera(ctx.root, meta["mode"], meta["table_z"])
+    cam.to_pixel([0.0, 0.2, meta["table_z"]])  # fails with the reason if the calibration lacks the camera's position
+    found = []
+    for blob in table_blobs(ctx, cam, img, meta)[0]:
+        one = describe(cam, blob, img, len(found) + 1) if len(found) < max_objects else None
+        if one:
+            found.append(one)
+    return [o for o, _ in found], [m for _, m in found]
 
 
 def from_wrist(ctx, img: np.ndarray, meta: dict, max_objects: int) -> tuple[list[dict], list[dict]]:

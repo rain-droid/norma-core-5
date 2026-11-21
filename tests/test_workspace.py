@@ -35,6 +35,8 @@ def robot(tmp_path_factory):
     os.environ["ELROBOT_DAEMON"] = f"http://127.0.0.1:{port}"  # read by util/arm.py when first imported
     sys.path.insert(0, str(root / "tools"))
     yield root, app.state.hub.link.frame_provider.__self__  # the simulated world: where the blocks really are
+    if "util.tracker" in sys.modules:
+        sys.modules["util.tracker"].stop()  # the one process a tool leaves behind
     server.should_exit = True
     thread.join(5)
 
@@ -116,3 +118,117 @@ def test_workspace_plans_with_the_model_the_robot_side_checks_against():
     """The workspace carries its own copy of the robot model. If the two drifted apart, plans made
     here would be judged against a different arm."""
     assert (REPO_ROOT / "workspace/robot_config/model.urdf").read_bytes() == Config().urdf.read_bytes()
+
+
+# ---- live tracking: positions that stay current, and what the tools do when the table changes
+
+
+def arrange(world) -> dict:
+    """A fresh table and a fresh tracker; returns the blocks by colour."""
+    from util import tracker
+
+    tracker.stop()
+    run("home")
+    run("open_gripper")
+    world.held = world.hand = None
+    blocks = {b.name.split()[0]: b for b in world.blocks}
+    for colour, xy in (("red", (0.07, 0.20)), ("blue", (-0.08, 0.22)), ("green", (0.0, 0.28))):
+        blocks[colour].xy, blocks[colour].z = np.array(xy), 0.0
+    return blocks
+
+
+def when(condition, then) -> threading.Thread:
+    """Do `then` once, from the side, as soon as `condition()` holds: the world changing while a tool runs."""
+
+    def watch():
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if condition():
+                return then()
+            time.sleep(0.02)
+
+    thread = threading.Thread(target=watch, daemon=True)
+    thread.start()
+    return thread
+
+
+def doing(label: str):
+    from util.arm import Arm
+
+    return lambda: Arm().state()["activity"] == label
+
+
+def test_tracks_keep_their_names_as_objects_move(robot):
+    _, world = robot
+    blocks = arrange(world)
+    first = {t["id"]: t for t in run("track_objects")["tracks"]}
+    assert set(first) == {"red-1", "blue-1", "green-1"}, first
+    for name, t in first.items():
+        assert t["state"] == "visible" and np.linalg.norm([t["x"], t["y"]] - blocks[t["color"]].xy) < 0.008, t
+
+    blocks["red"].xy = np.array([0.15, 0.30])  # further than any one step of a sliding object
+    time.sleep(1.0)
+    after = {t["id"]: t for t in run("track_objects")["tracks"]}
+    assert set(after) == set(first), "the same object under the same name, not a new one"
+    assert np.linalg.norm([after["red-1"]["x"], after["red-1"]["y"]] - blocks["red"].xy) < 0.008 and after["red-1"]["still_s"] < 2.0
+
+
+def test_pick_goes_to_where_the_object_is_by_then(robot):
+    _, world = robot
+    blocks = arrange(world)
+    run("track_objects")
+
+    def nudge():
+        time.sleep(0.1)
+        blocks["red"].xy = blocks["red"].xy + [0.03, 0.03]
+
+    when(doing("reaching"), nudge)
+    picked = run("pick_object", object="red-1")
+    assert picked.get("holding") and world.held is blocks["red"], picked
+    assert picked["tried"], "it noticed: either aimed again from the hover point, or closed on nothing and looked again"
+
+    placed = run("place_object", x=0.12, y=0.26)
+    assert placed.get("checked") and placed["off_target_mm"] < 12, placed
+    assert np.linalg.norm(blocks["red"].xy - [0.12, 0.26]) < 0.01
+
+
+def test_a_hand_in_the_work_area_stops_the_arm_and_the_pick_resumes(robot):
+    from elrobot.simworld import Block
+    from util import tracker
+
+    _, world = robot
+    blocks = arrange(world)
+    run("track_objects")
+
+    def reach_in():
+        world.hand = Block("hand", np.array([0.27, 0.33]), (0.26, 0.10), 0.03, (120, 60, 30))
+        time.sleep(1.5)
+        blocks["red"].xy = np.array([0.13, 0.24])  # and it moves the object while it is there
+        world.hand = None
+
+    when(doing("reaching"), reach_in)
+    picked = run("pick_object", object="red-1")
+    assert picked.get("holding") and world.held is blocks["red"], picked
+    assert any("stopped" in step for step in picked["tried"]), picked
+    assert tracker.read()["stopped_arm_t"], "the tracker is what stopped it"
+
+
+def test_a_stack_is_checked_and_an_object_that_fell_off_is_put_back(robot):
+    _, world = robot
+    blocks = arrange(world)
+    run("track_objects")
+    assert run("pick_object", object="red-1").get("holding")
+
+    def fall_off():
+        time.sleep(0.3)
+        blocks["red"].xy, blocks["red"].z = np.array([-0.15, 0.30]), 0.0
+
+    when(doing("backing off"), fall_off)
+    placed = run("place_object", on="blue-1")
+    assert placed.get("checked") and any("placed it again" in step for step in placed["tried"]), placed
+    assert blocks["red"].z == blocks["blue"].height and np.linalg.norm(blocks["red"].xy - blocks["blue"].xy) < 0.012
+    tracks = {t["id"]: t for t in run("track_objects")["tracks"]}
+    assert tracks["red-1"]["on"] == "blue-1"
+
+    # and it comes off again from on top, not from the table
+    assert run("pick_object", object="red-1").get("holding") and world.held is blocks["red"]
