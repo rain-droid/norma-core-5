@@ -16,6 +16,14 @@ def require_ready(ctx) -> None:
     why = ctx.robot.why_not_ready()
     if why:
         raise RobotError(why)
+    # A servo that tripped its overload protection only gives 20 % torque: the joint sags and
+    # the arm no longer goes where it is sent. Moving on from there is how things get hit.
+    faulted = [i for i, m in sorted(ctx.robot.link.motors.items()) if m.status]
+    if faulted:
+        raise RobotError(
+            f"servo fault on joint(s) {faulted} (status bit 32 = overload). Do not move. A person must hold the arm, "
+            "then torque is cycled off and on to clear it (POST /api/torque enable false, then true)."
+        )
 
 
 def tcp_report(ctx) -> dict:
