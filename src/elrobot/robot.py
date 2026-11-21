@@ -468,6 +468,9 @@ class Robot:
         return MoveResult("done", residual=residual)
 
     async def _begin(self, label: str) -> None:
+        # IK runs on the event loop and can starve the state reader for over half a second;
+        # let it catch up before judging the link dead
+        await self.link.wait_connected(1.0)
         why = self.why_not_ready()
         if why:
             raise RobotError(why)

@@ -48,12 +48,25 @@ def load(ctx, image_id: str) -> tuple[np.ndarray, dict]:
 
 
 def table_point(ctx, meta: dict, u: float, v: float, height: float = 0.0) -> np.ndarray:
-    """Base-frame point where the ray through pixel (u, v) of a wrist capture meets the
-    horizontal plane `height` metres above the table."""
-    if meta.get("T_base_tool") is None:
-        raise RobotError(f"capture '{meta['image_id']}' is from the {meta['camera']} camera, which has no calibration; only wrist captures give table positions")
+    """Base-frame point on the horizontal plane `height` metres above the table that pixel
+    (u, v) of a capture shows. Wrist captures cast a ray from the camera pose; top captures
+    use the tag homography from calibrate_top, which only knows the mat surface."""
     if not (0 <= u < meta["width"] and 0 <= v < meta["height"]):
         raise RobotError(f"pixel ({u}, {v}) is outside the {meta['width']}x{meta['height']} image")
+    if meta["camera"] == "top":
+        path = ctx.cfg.data_dir / "camera_top.json"
+        cal = json.loads(path.read_text()) if path.exists() else {}
+        if not cal.get("base_in_mat"):
+            raise RobotError("the top camera is not calibrated: run calibrate_top, and data/camera_top.json needs base_in_mat")
+        if height:
+            raise RobotError("top captures only give positions on the mat surface: aim at where the object meets the mat and leave height at 0")
+        mat = cv2.perspectiveTransform(np.array([[[u, v]]], dtype=np.float64), np.array(cal["H_mat_px"]))[0, 0]
+        bx, by, yaw = cal["base_in_mat"]  # robot base origin on the mat (m) and its rotation (deg)
+        c, s = np.cos(np.radians(yaw)), np.sin(np.radians(yaw))
+        d = mat - [bx, by]
+        return np.array([c * d[0] + s * d[1], -s * d[0] + c * d[1], ctx.cfg.table_z])
+    if meta.get("T_base_tool") is None:
+        raise RobotError(f"capture '{meta['image_id']}' is from the {meta['camera']} camera, which has no calibration")
     cam = ctx.skills.cam.scaled(meta["width"], meta["height"])
     p = cam.pixel_to_plane(u, v, np.array(meta["T_base_tool"]), ctx.cfg.table_z + height)
     if p is None:

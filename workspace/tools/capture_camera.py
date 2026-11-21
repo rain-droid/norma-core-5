@@ -23,7 +23,7 @@ async def capture_camera(ctx, camera: str = "wrist", grid: bool = True) -> dict:
         "height": meta["height"],
         "image": meta["image"],
         "grid_image": meta.get("grid_image"),
-        "gives_table_positions": meta["T_base_tool"] is not None,
+        "gives_table_positions": True,
         "tcp": tcp_report(ctx) if ctx.robot.ready else None,
     }
 

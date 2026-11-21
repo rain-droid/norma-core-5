@@ -6,5 +6,8 @@ cameras:
   "0x1312402c7f4a60": wrist
   "0x1312202c7f4a60": top
   # Linux ids are vendor:product:bus:device and change when a camera is replugged; re-run scripts/probe.py then.
-  "11391:19040:5:15": wrist
-  "11391:19040:5:17": top
+  "11391:19040:5:24": wrist
+  "11391:19040:5:22": top
+
+# The base stands on the table; the mat's top surface is 10 mm above it.
+table_z: 0.010
