@@ -29,7 +29,7 @@ kinematics. The robot is a separate process that it talks to over local HTTP.
 
 ```bash
 pixi run python tools/find_objects.py '{}'
-pixi run python tools/pick_at.py '{"x": 0.07, "y": 0.20, "yaw": 0}'
+pixi run python tools/pick_at.py '{"x": 0.07, "y": 0.20, "yaw_deg": 0}'
 pixi run python tools/move_tcp.py --schema        # signature and full description
 ```
 

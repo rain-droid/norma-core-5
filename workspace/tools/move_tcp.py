@@ -4,9 +4,9 @@ Metres in the base frame: origin on the table under the base, x to the robot's r
 away from the base, z up. On the table the arm reaches a half-disc of about 0.38 m in front of
 the base; straight-down poses only exist within about 0.27 m.
 
-`pitch` is how far below horizontal the gripper points: 90 straight down, 0 level. Left out,
-the most vertical approach that reaches is used (tries 90, 75, 60, 45, 30, 15). `yaw` rotates
-the jaws about the pointing direction, degrees (0 = jaws close left-right).
+`pitch_deg` is how far below horizontal the gripper points: 90 straight down, 0 level. Left
+out, the most vertical approach that reaches is used (tries 90, 75, 60, 45, 30, 15). `yaw_deg`
+rotates the jaws about the pointing direction (0 = jaws close left-right). Both in degrees.
 
 How it gets there: inverse kinematics (util/planning.py) turns the pose into joint angles, and
 one joint command goes there, so the tool sweeps an arc, not a line. `straight: true` instead
@@ -24,18 +24,18 @@ from util.arm import RobotError
 from util.motion import require_ready, tcp_report
 
 
-def move_tcp(ctx, x: float, y: float, z: float, pitch: float | None = None, yaw: float | None = None,
+def move_tcp(ctx, x: float, y: float, z: float, pitch_deg: float | None = None, yaw_deg: float | None = None,
              straight: bool = False, speed: float = 0.8, allow_low: bool = False) -> dict:  # fmt: skip
     require_ready(ctx, awake=True)
     plan, pos, start = ctx.plan, np.array([x, y, z], dtype=float), ctx.arm.q()
     if straight:
-        approach = approach_from_pitch(pos[:2], pitch) if pitch is not None else None
-        target, used = plan.line(start, pos, approach=approach, allow_low=allow_low), pitch
+        approach = approach_from_pitch(pos[:2], pitch_deg) if pitch_deg is not None else None
+        target, used = plan.line(start, pos, approach=approach, allow_low=allow_low), pitch_deg
     else:
-        if pitch is None:
-            solution, used = plan.reach(pos, yaw=yaw, q_seed=start, allow_low=allow_low)
+        if pitch_deg is None:
+            solution, used = plan.reach(pos, yaw=yaw_deg, q_seed=start, allow_low=allow_low)
         else:
-            solution, used = plan.solve(pos, pitch=pitch, yaw=yaw, q_seed=start, allow_low=allow_low), pitch
+            solution, used = plan.solve(pos, pitch=pitch_deg, yaw=yaw_deg, q_seed=start, allow_low=allow_low), pitch_deg
         if not solution.ok:
             raise RobotError(plan.unreachable(pos, solution))
         target = solution.q

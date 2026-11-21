@@ -18,10 +18,10 @@ Read the error first: each one is written to be acted on. Then, by what it says:
   of all with `check: false`. A person has to hold the arm while torque is switched off and on.
   Say so plainly and wait.
 - **fingertips would be N mm into the table**, **the arm body would hit the table**,
-  **... would hit the ...**: the pose is outside the envelope. Choose another: higher, `yaw` 0,
-  a different `pitch`.
+  **... would hit the ...**: the pose is outside the envelope. Choose another: higher, `yaw_deg` 0,
+  a different `pitch_deg`.
 - **can't reach**, **can't move in a straight line: stuck N%**: the edge of reach. Straight-
-  down poses only exist within about 27 cm of the base; lean the gripper (a lower `pitch`),
+  down poses only exist within about 27 cm of the base; lean the gripper (a lower `pitch_deg`),
   work lower, or work closer in.
 - **closed on nothing**: the object is not where you sent the gripper. Look again; never retry
   the same numbers.

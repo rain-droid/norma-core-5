@@ -54,7 +54,7 @@ def test_pick_and_place_from_the_top_camera(robot):
     assert np.linalg.norm(np.array([seen["red"]["x"], seen["red"]["y"]]) - red.xy) < 0.006, seen["red"]
     assert abs(seen["red"]["width_mm"] - 25) <= 3
 
-    picked = run("pick_at", x=seen["red"]["x"], y=seen["red"]["y"], yaw=seen["red"]["yaw_deg"])
+    picked = run("pick_at", x=seen["red"]["x"], y=seen["red"]["y"], yaw_deg=seen["red"]["yaw_deg"])
     assert picked.get("holding") and 20 < picked["width_mm"] < 30, picked
     placed = run("place_at", x=0.10, y=0.28)
     assert placed.get("released_something"), placed

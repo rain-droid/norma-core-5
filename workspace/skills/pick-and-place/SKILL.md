@@ -19,7 +19,7 @@ description: Pick up an object from the table and put it down somewhere else, or
    - "closed on nothing": the object is not at that x, y. Do not retry the same numbers; go
      back to step 1.
    - "fingertips would be N mm into the table": far objects need leaning jaws, and leaning,
-     turned jaws dip. Raise `grasp_height` to 0.020 or more, or use `yaw` 0.
+     turned jaws dip. Raise `grasp_height` to 0.020 or more, or use `yaw_deg` 0.
    - "can't reach": it is too far (about 38 cm from the base) or too close.
 5. After a pick, confirm: `holding` true and a `width_mm` that matches the object. Then look:
    in a new `find_objects` the object should be gone from where it stood, and

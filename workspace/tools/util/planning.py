@@ -130,7 +130,7 @@ class Planner:
         elif refused and last is not None and "rejected" in last.reason:
             # reachable, but not allowed: most often a fingertip of leaning, turned jaws dipping
             # below the table, which a higher grasp or yaw 0 avoids
-            why = f"every pose that gets there was refused, most recently: {refused[-1]}. Try a larger grasp height, or yaw 0"
+            why = f"every pose that gets there was refused, most recently: {refused[-1]}. Try a larger grasp_height, or yaw_deg 0"
         else:
             why = last.describe() if last else "no approach found"
         raise RobotError(f"can't reach a grasp at x={target[0]:+.3f} y={target[1]:+.3f}: {why}")
