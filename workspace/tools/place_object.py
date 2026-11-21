@@ -6,9 +6,10 @@ table; `z` if the surface there is higher than the table). The motion is place_a
 lower in a straight line, open the jaws 22 mm above the surface, back out along the same line.
 What this adds:
 
-* it waits until nothing is reaching into the work area, and aims at where `on` is then;
-* at the hover point it reads that position again, and aims again if it moved more than 8 mm;
-* if the tracker stops the arm because a hand came in, it waits and carries on;
+* it waits until the table is quiet, and aims at where `on` is then;
+* at the hover point it asks whether `on` has been moved since, and aims again if so;
+* if the tracker stops the arm because something moved on the table (a hand, most likely), it
+  waits for quiet and carries on;
 * afterwards it waits for the top camera to see the object again (sending the arm home if the
   arm is in the way) and compares. On the table, it must lie within 25 mm of x, y. On another
   object, it must not be lying anywhere else, and the pile must look bigger than what was
@@ -29,7 +30,7 @@ import time
 import numpy as np
 
 from home import home
-from pick_object import REAIM, pick_object
+from pick_object import pick_object
 from place_at import RELEASE_ABOVE
 from util import tracker
 from util.arm import RobotError
@@ -72,7 +73,9 @@ def place_object(ctx, object: str = "", on: str = "", x: float | None = None, y:
         raise RobotError(f"{on} is what the gripper holds")
     tried: list[str] = []
     target = surface = under = None
-    for _ in range(attempts):
+    left, waits = attempts, 0
+    while left > 0:
+        left -= 1
         try:
             if not arm.state()["gripper"]["holding"] and target is not None:
                 break  # stopped after the jaws had opened: it is down, what is left is to see where
@@ -91,9 +94,9 @@ def place_object(ctx, object: str = "", on: str = "", x: float | None = None, y:
             arm.joints(q_hover, speed=0.8, label="carrying")
             if on:
                 now = tracker.track(tracker.fresh(), on)
-                moved = float(np.hypot(now["x"] - target[0], now["y"] - target[1]))
-                if now["state"] == "missing" or moved > REAIM:
-                    tried.append(f"{on} moved {moved * 1000:.0f} mm while the arm was carrying: aiming again")
+                if now["state"] == "missing" or now["moves"] != base["moves"]:
+                    moved = float(np.hypot(now["x"] - target[0], now["y"] - target[1]))
+                    tried.append(f"{on} was moved {moved * 1000:.0f} mm while the arm was carrying: aiming again")
                     continue
             arm.joints(down, speed=0.5, allow_low=True, label="lowering")
             arm.joints(gripper=1.0, label="releasing")
@@ -102,7 +105,9 @@ def place_object(ctx, object: str = "", on: str = "", x: float | None = None, y:
         except RobotError as e:
             if not tracker.stopped_by_tracker(e):
                 raise
-            tried.append("the arm was stopped because something came into the work area: waiting for it to leave")
+            tried.append("the arm was stopped because something moved in the work area: waiting for it to go quiet")
+            waits += 1
+            left += waits <= 6  # being interrupted is not a failed attempt, up to a point
     else:
         raise RobotError(f"could not place it in {attempts} attempts, and still hold it: " + "; ".join(tried))
 

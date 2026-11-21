@@ -4,12 +4,14 @@
 7 cm back along the approach, descend in a straight line, close until the jaws stall, lift.
 What this adds is that it keeps reading the tracker while it works:
 
-* it waits until nothing is reaching into the work area and the object is lying still;
+* it waits until the table is quiet (nothing moving that the arm did not move) and the object
+  is lying still;
 * it aims at where the object is then, with the jaws across its flat sides;
-* at the hover point it reads the position again, and if the object has moved more than 8 mm
-  it aims again instead of descending;
-* if the tracker stops the arm because a hand came in, it waits for the hand to leave and
-  starts over from where the object is now;
+* at the hover point it asks whether the object has been moved since, and if so aims again
+  instead of descending;
+* if the tracker stops the arm because something moved on the table (a hand, most likely), it
+  waits for quiet and starts over from where the object is now. Being stopped does not count
+  against `attempts`;
 * if the jaws close on nothing, or the object slips out while lifting, it looks and tries again;
 * if the grasp is refused because leaning, turned jaws would dip a fingertip into the table,
   it grasps 5 mm higher, and then with the jaws unturned.
@@ -35,8 +37,6 @@ from util import tracker
 from util.arm import RobotError
 from util.motion import require_ready, tcp_report
 
-REAIM = 0.008  # metres the object may have moved between aiming and descending
-
 
 def approach(plan, target, height: float, yaw: float, tried: list[str]):
     """plan.approach_for, giving way when the first choice is refused by the clearance check:
@@ -60,7 +60,9 @@ def pick_object(ctx, object: str, grasp_height: float | None = None, attempts: i
         raise RobotError("already holding something; place it first")
     tried: list[str] = []
     aim = None  # where the object was seen to have gone, when that is fresh enough to go straight there
-    for _ in range(attempts):
+    left, waits = attempts, 0
+    while left > 0:
+        left -= 1
         try:
             if arm.state()["gripper"]["holding"]:  # stopped after the jaws had closed: all that is left is to lift it clear
                 tracker.wait_for(ctx)
@@ -75,9 +77,9 @@ def pick_object(ctx, object: str, grasp_height: float | None = None, attempts: i
             arm.joints(gripper=1.0, label="opening")
             arm.joints(q_hover, speed=0.9, label="reaching")
             now = tracker.track(tracker.fresh(), object)
-            moved = float(np.hypot(now["x"] - t["x"], now["y"] - t["y"]))
-            if now["state"] == "missing" or moved > REAIM:
-                tried.append(f"{object} moved {moved * 1000:.0f} mm while the arm was reaching: aiming again")
+            if now["state"] == "missing" or now["moves"] != t["moves"]:
+                moved = float(np.hypot(now["x"] - t["x"], now["y"] - t["y"]))
+                tried.append(f"{object} was moved {moved * 1000:.0f} mm while the arm was reaching: aiming again")
                 if now["state"] != "missing" and now["seen_s"] < 1.5 and now["still_s"] > 0.4:
                     aim = now  # measured at rest in its new place just before the arm came over it
                 continue
@@ -105,7 +107,9 @@ def pick_object(ctx, object: str, grasp_height: float | None = None, attempts: i
         except RobotError as e:
             if not tracker.stopped_by_tracker(e):
                 raise
-            tried.append("the arm was stopped because something came into the work area: waiting for it to leave")
+            tried.append("the arm was stopped because something moved in the work area: waiting for it to go quiet")
+            waits += 1
+            left += waits <= 6  # being interrupted is not a failed attempt, up to a point
     raise RobotError(f"could not pick {object} in {attempts} attempts: " + "; ".join(tried))
 
 

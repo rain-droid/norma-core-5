@@ -16,9 +16,13 @@ An object keeps its id for as long as it is on the table. Its `state` is one of
 An object put down on another one gets `on` (the id underneath) and travels with it. One that
 turns up somewhere else after being out of sight is recognised by its colour.
 
-`intrusion` is set while something large reaches in over the edge of the searched area: a hand
-or an arm. While it is set the tracker stops any arm motion (`stopped_arm_t`), unless it was
-started with --no-stop. `clear_s` is how long the area has been free of that.
+`intrusion` is set while something is moving on the table that the arm did not move: a thing
+coming in over the edge of the searched area, something new appearing, a tracked object
+sliding. That is what a hand looks like from here. It stays set until the table has been
+quiet for a second and a half. While it is set the tracker stops any arm motion
+(`stopped_arm_t`), unless it was started with --no-stop. `clear_s` is how long it has been
+quiet. A thing that lies still is not an intrusion, whatever it is: one lying across the edge
+is listed under `at_edge`, where it cannot be measured or picked by name.
 
 Started by tools/track_objects.py, or by the first tool that needs it. It ends by itself when
 the robot side goes away. To watch it work: `cd tools && pixi run python -m util.tracker`.
@@ -46,22 +50,32 @@ from util.arm import Arm, RobotError
 ROOT = Path(__file__).resolve().parents[2]
 FILE = ROOT / "perception" / "exteroception" / "tracks.json"
 RUNTIME = ROOT / ".runtime"
+NO_STOP = RUNTIME / "tracker_does_not_stop_the_arm"  # exists while someone has switched the stopping off
 
 PERIOD = 0.1  # seconds between looks
-SAME_SPOT = 0.015  # m: a sighting this close to a track is that object, whatever its colour reads as
-SAME_OBJECT = 0.06  # m: one this close and of the same colour is that object, moved
-MOVED = 0.008  # m: further than this from where it has been lying means it moved; nearer is measurement noise
+SAME_SPOT = 12  # pixels: an outline centred this close to a track's is that object, whatever its colour reads as
+SAME_OBJECT = 45  # pixels (about 6 cm on the table): one this close and of the same colour is that object, moved
+MOVED = 4  # pixels: centred further than this from where it has been means it moved; a still outline wanders by one
 CONFIRM = 3  # looks in a row before something new becomes a track
 GONE_AFTER = 5  # looks in a row with its place in view and empty before a track is "missing"
 FORGET_S = 120.0  # seconds a missing track is kept
-INTRUDER_PX = 1500  # image area: larger than this and reaching in over the edge is a hand, not an object
-INTRUDER_LOOKS = 2  # looks in a row before it counts (and stops the arm)
+NEWS_LOOKS = 2  # looks in a row something unexplained must show before it counts (one look can be a glitch)
+LARGE_PX = 1500  # image area: something this large appearing at the edge counts at its first look
+QUIET_S = 1.5  # seconds without anything moving before the table counts as clear again
+LAG_LOOKS = 3  # the camera runs behind the joint angles: the arm is masked where it has been for this many looks
+RENAME_LOOKS = 10  # looks in a row a track must read as another colour than its name before it is renamed
 GRIP_REACH = 0.04  # m: when the jaws close on something, it is the track this close to the tool point
 STACK_REACH = 0.03  # m: let go this close above another track means put down on it
 
 
 def _apart(a, b) -> float:
+    """Metres between two things on the table."""
     return float(np.hypot(a["x"] - b["x"], a["y"] - b["y"]))
+
+
+def _px(a, b) -> float:
+    """Pixels between the centres of two outlines in the image."""
+    return float(np.hypot(a["u"] - b["u"], a["v"] - b["v"]))
 
 
 class Watcher:
@@ -78,7 +92,12 @@ class Watcher:
         self.tracks: list[dict] = []
         self.maybe: list[dict] = []  # seen, not yet often enough to be a track
         self.numbers: dict[str, int] = {}
-        self.intruder_looks = 0
+        self.arm_masks: deque = deque(maxlen=LAG_LOOKS)
+        self.edge: list[dict] = []  # things across the edge of the searched area, and for how many looks each has lain still
+        self.news: list[tuple[str, bool]] = []  # what moved in this look that the arm did not move, and whether one look is proof
+        self.news_looks = 0
+        self.news_t = 0.0
+        self.said_t = 0.0
         self.intrusion: dict | None = None
         self.clear_since = time.time()
         self.stopped_arm_t: float | None = None
@@ -95,13 +114,15 @@ class Watcher:
         img = self.arm.frame("top", settle=0.0)
         tcp = np.array(state["ee"]["pos"]) if state.get("ee") else None
         gripping = bool(state["gripper"]["holding"]) and tcp is not None
-        hide = None
+        q = [j["q"] for j in state["joints"][:7]]
+        self.arm_masks.append(self.find.arm_mask(self.ctx, self.cam, img.shape, q))
+        hide = np.logical_or.reduce(list(self.arm_masks))
         if gripping:  # what the jaws hold hangs in view beside the arm: it is not standing on the table
             uv = self.cam.to_pixel(tcp)
-            hide = np.zeros(img.shape[:2], np.uint8)
-            cv2.circle(hide, (int(uv[0]), int(uv[1])), int(np.linalg.norm(self.cam.to_pixel(tcp + [0.045, 0, 0]) - uv)) + 6, 255, -1)
-            hide = hide > 0
-        blobs, area, covered = self.find.table_blobs(self.ctx, self.cam, img, {"table_z": self.table_z, "joints_rad": [j["q"] for j in state["joints"][:7]]}, hide)
+            disc = np.zeros(img.shape[:2], np.uint8)
+            cv2.circle(disc, (int(uv[0]), int(uv[1])), int(np.linalg.norm(self.cam.to_pixel(tcp + [0.045, 0, 0]) - uv)) + 6, 255, -1)
+            hide |= disc > 0
+        blobs, area, covered = self.find.table_blobs(self.ctx, self.cam, img, {"table_z": self.table_z, "joints_rad": q}, hide)
         near = cv2.dilate(covered.astype(np.uint8), np.ones((15, 15), np.uint8)) > 0  # the arm and a little around it
         # The edge of the searched area that a hand can come in over: the left, right and camera
         # sides. Not the robot's side: everything tall leans that way in this view, so the top of
@@ -110,80 +131,117 @@ class Watcher:
         ends = [tuple(int(round(c)) for c in self.cam.to_pixel([x, self.find.SEARCH_Y[0], self.table_z])) for x in self.find.SEARCH_X]
         rim &= cv2.line(np.zeros(img.shape[:2], np.uint8), *ends, 255, 15) == 0
 
-        seen, intruders = [], []
+        self.news = []
+        seen, across = [], []
         for blob in blobs:
             shape = np.zeros(img.shape[:2], np.uint8)
             cv2.fillPoly(shape, [np.array(blob.polygon, np.int32)], 255)
             shape = shape > 0
-            if (shape & rim & ~near).any():  # it comes in from outside, and not along the arm
-                if blob.area >= INTRUDER_PX:
-                    intruders.append(blob)
-                continue  # smaller: something lying across the edge, where it cannot be measured
+            cut = bool((shape & near).any())  # part of it is behind the arm: it is there, but this is no measurement of it
+            if (shape & rim & ~near).any():  # it lies across the edge, or is coming in over it: either way it cannot be measured
+                if not cut:
+                    across.append(blob)
+                continue
             one = self.find.describe(self.cam, blob, img, "")
             if one:
-                # cut: part of it is behind the arm, so it is there but this is no measurement of it
-                seen.append({**one[0], "cut": bool((shape & near).any()), "area_px": round(blob.area), "polygon": blob.polygon, "box": list(blob.box)})
+                seen.append({**one[0], "cut": cut, "u": blob.centroid[0], "v": blob.centroid[1], "area_px": round(blob.area), "polygon": blob.polygon, "box": list(blob.box)})
 
-        self._intrusion(intruders, state, now, stop_on_intrusion)
-        self._match(seen, near, intruders, now)
+        self._edge(across)
+        self._match(seen, near, [list(b.box) for b in across], now)
         self._gripper(gripping, tcp, now)
+        self._intrusion(state, now, stop_on_intrusion)
         self.tracks = [t for t in self.tracks if not (t["state"] == "missing" and now - t["seen_t"] > FORGET_S)]
-        return self._report(now), self._picture(img, intruders)
+        return self._report(now), self._picture(img)
 
-    def _intrusion(self, intruders, state, now, stop_on_intrusion) -> None:
-        if not intruders:
-            if self.intrusion:
-                self.clear_since = now
-                self.arm.emit("log", level="info", text="the work area is clear again")
-            self.intruder_looks, self.intrusion = 0, None
-            return
-        self.intruder_looks += 1
-        if self.intruder_looks < INTRUDER_LOOKS:
-            return
-        big = intruders[0]
-        if self.intrusion is None:
-            self.intrusion = {"since": round(now, 2)}
-            self.arm.emit("log", level="warn", text="something large entered the work area")
-        at = self.cam.to_base(*big.centroid)
-        self.intrusion.update(x=round(float(at[0]), 3), y=round(float(at[1]), 3), box=list(big.box), area_px=round(big.area))
-        if stop_on_intrusion and state["busy"]:
+    def _edge(self, across) -> None:
+        """Things across the edge of the searched area. One that looks as it did at some look in
+        the last few seconds is lying there (two things side by side merge into one outline and
+        part again from look to look). One never seen like this is something coming in."""
+        for e in self.edge:
+            e["unseen"] += 1
+        for blob in across:
+            cx, cy = blob.centroid
+            same = next((e for e in self.edge if abs(e["cx"] - cx) < 8 and abs(e["cy"] - cy) < 8 and 0.75 < blob.area / e["area"] < 1.33), None)
+            if same is None:
+                self.news.append(("something is moving at the edge of the work area", blob.area >= LARGE_PX))
+                self.edge.append({"cx": cx, "cy": cy, "area": blob.area, "box": list(blob.box), "looks": 1, "unseen": 0})
+            else:
+                same.update(looks=same["looks"] + 1, unseen=0)
+        # what has lain there for a second is remembered while the arm passes in front of it; what only passed through, for three seconds
+        self.edge = [e for e in self.edge if e["unseen"] < (600 if e["looks"] >= 10 else 30)]
+
+    def _intrusion(self, state, now, stop_on_intrusion) -> None:
+        self.news_looks = self.news_looks + 1 if self.news else 0
+        if self.news and (self.news_looks >= NEWS_LOOKS or any(proof for _, proof in self.news)):
+            self.news_t = now
+            what = next((text for text, proof in self.news if proof), self.news[0][0])
+            if self.intrusion is None:
+                self.intrusion = {"since": round(now, 2)}
+                if now - self.said_t > 5.0:  # the timeline is for people: not a line for every twitch of a hand
+                    self.said_t = now
+                    self.arm.emit("log", level="warn", text=f"work area: {what}")
+            self.intrusion["what"] = what
+        elif self.intrusion and now - self.news_t > QUIET_S:
+            self.intrusion, self.clear_since = None, now
+        if self.intrusion and stop_on_intrusion and state["busy"]:
             self.arm.stop()
             self.stopped_arm_t = round(now, 2)
 
-    def _hidden(self, t: dict, near: np.ndarray, intruders) -> bool:
-        """Is the place where this track was last measured out of the camera's sight?"""
-        u, v = (int(round(c)) for c in self.cam.to_pixel([t["x"], t["y"], self.table_z + 0.01]))
+    def _hidden(self, t: dict, near: np.ndarray, boxes) -> bool:
+        """Is the place where this track was last measured out of the camera's sight: behind the
+        arm, or behind something else that is not an object on the table (a hand)?"""
+        u, v = int(round(t["u"])), int(round(t["v"]))
         if not (0 <= v < near.shape[0] and 0 <= u < near.shape[1]) or near[v, u]:
             return True
-        return any(b.box[0] - 12 <= u <= b.box[2] + 12 and b.box[1] - 12 <= v <= b.box[3] + 12 for b in intruders)
+        return any(b[0] - 12 <= u <= b[2] + 12 and b[1] - 12 <= v <= b[3] + 12 for b in boxes)
 
-    def _sighting(self, t: dict, d: dict, now: float) -> None:
+    def _sighting(self, t: dict, d: dict, now: float, elsewhere: bool = False) -> None:
         t["misses"] = 0
         if d["cut"]:
             t["state"] = "hidden"
             return
-        if t["recent"] and _apart(d, t) > MOVED:
+        # Named for the colour it first showed. Two things touching are one outline with one
+        # (mixed) colour, and one of them keeps the name when they part: so a name that has not
+        # fitted for a second is replaced by one that does. What carries others reads as a mixture.
+        fits = d["color"] == t["color"] or any(o["on"] == t["id"] for o in self.tracks)
+        t["misnamed"] = 0 if fits else t["misnamed"] + 1
+        if t["misnamed"] >= RENAME_LOOKS:
+            self._name(t, d["color"])
+        if elsewhere or (t["recent"] and _px(d, t) > MOVED):
+            if t.get("state") == "visible" and now - t["seen_t"] < 0.35:  # it was in plain view a look ago: nothing hid it, something moved it
+                self.news.append((f"{t['id']} is being moved", True))
             t["recent"].clear()
             t["moved_t"] = now
+            t["moves"] += 1
         t["recent"].append(d)
-        # where it is: the middle one of the last few measurements, so one noisy outline does not move it
-        xs, ys = np.median([[r["x"], r["y"]] for r in t["recent"]], axis=0)
-        mid = min(t["recent"], key=lambda r: (r["x"] - xs) ** 2 + (r["y"] - ys) ** 2)
-        t.update({k: mid[k] for k in ("x", "y", "yaw_deg", "width_mm", "footprint_mm", "pixel", "area_px")}, state="visible", seen_t=now, polygon=d["polygon"], box=d["box"])
+        # Where the outline is centred in the image is steady to a pixel while the object lies
+        # still. Where it stands on the table is worked out from the outline's shape and wanders
+        # by centimetres for anything that is not a plain box, so that is taken as the median
+        # of every measurement since the object last moved.
+        x, y, u, v = np.median([[r["x"], r["y"], r["u"], r["v"]] for r in t["recent"]], axis=0)
+        mid = min(t["recent"], key=lambda r: (r["x"] - x) ** 2 + (r["y"] - y) ** 2)
+        t.update({k: mid[k] for k in ("yaw_deg", "width_mm", "footprint_mm", "area_px")}, x=round(float(x), 3), y=round(float(y), 3), u=float(u), v=float(v),
+                 pixel=[round(float(c)) for c in self.cam.to_pixel([x, y, self.table_z])], state="visible", seen_t=now, polygon=d["polygon"], box=d["box"])  # fmt: skip
         heights = [r["height_mm"] for r in t["recent"] if r["height_mm"] is not None]
-        if heights:
+        if len(heights) * 2 > len(t["recent"]):  # only objects with a flat, lit top have a height to measure
             t["height_mm"] = round(float(np.median(heights)))
 
-    def _match(self, seen: list[dict], near, intruders, now: float) -> None:
+    def _name(self, t: dict, colour: str) -> None:
+        word = colour or "object"
+        self.numbers[word] = self.numbers.get(word, 0) + 1
+        t.update(id=f"{word}-{self.numbers[word]}", color=colour, misnamed=0)
+
+    def _match(self, seen: list[dict], near, boxes: list, now: float) -> None:
         riders = {t["on"] for t in self.tracks if t["on"]}
         loose = [t for t in self.tracks if t["state"] != "held" and not t["on"]]
         taken_t, taken_d = set(), set()
-        for gap, i, j in sorted((_apart(t, d), i, j) for i, t in enumerate(loose) for j, d in enumerate(seen)):
+        for gap, i, j in sorted((_px(t, d), i, j) for i, t in enumerate(loose) for j, d in enumerate(seen)):
             t, d = loose[i], seen[j]
             if i in taken_t or j in taken_d:
                 continue
-            # a pile reads as some mixture of its colours, so what carries others is matched by place alone
-            if gap < SAME_SPOT or (gap < SAME_OBJECT and (d["color"] == t["color"] or t["id"] in riders)):
+            # By place alone when close; further off, when the colour agrees. A pile reads as some
+            # mixture of its colours, and what has been out of sight has no fresh colour to compare.
+            if gap < SAME_SPOT or (gap < SAME_OBJECT and (d["color"] == t["color"] or t["id"] in riders or t["state"] != "visible")):
                 taken_t.add(i), taken_d.add(j)
                 self._sighting(t, d, now)
         # one that is no longer where it was and is seen somewhere else, or fell off what it was put on: told by its colour
@@ -193,17 +251,15 @@ class Watcher:
             lost = [t for i, t in enumerate(loose) if i not in taken_t and t["color"] == d["color"]]
             lost += [t for t in self.tracks if t["on"] and t["color"] == d["color"]]
             if lost:
-                t = min(lost, key=lambda t: _apart(t, d))
+                t = min(lost, key=lambda t: _px(t, d))
                 taken_d.add(j)
                 taken_t.update(i for i, other in enumerate(loose) if other is t)
                 t["on"], t["z_mm"] = None, 0
-                t["recent"].clear()
-                t["moved_t"] = now
-                self._sighting(t, d, now)
+                self._sighting(t, d, now, elsewhere=True)
         for i, t in enumerate(loose):
             if i in taken_t:
                 continue
-            if self._hidden(t, near, intruders):
+            if self._hidden(t, near, boxes + [d["box"] for j, d in enumerate(seen) if j not in taken_d]):
                 t["state"], t["misses"] = "hidden", 0
             else:
                 t["misses"] += 1
@@ -212,23 +268,23 @@ class Watcher:
         # what is left is new: a track once it has been seen in the same place a few looks running
         again = []
         for j, d in enumerate(seen):
-            if j in taken_d or d["cut"] or self.intrusion:
+            if j in taken_d or d["cut"]:
                 continue
-            before = next((m for m in self.maybe if _apart(m, d) < SAME_SPOT), None)
+            self.news.append(("something new is on the table", False))
+            before = next((m for m in self.maybe if _px(m, d) < SAME_SPOT), None)
             d["looks"] = (before["looks"] if before else 0) + 1
             if d["looks"] < CONFIRM:
                 again.append(d)
                 continue
-            name = d["color"] or "object"
-            self.numbers[name] = self.numbers.get(name, 0) + 1
-            t = {"id": f"{name}-{self.numbers[name]}", "color": d["color"], "height_mm": None, "on": None, "z_mm": 0, "moved_t": now, "recent": deque(maxlen=7)}
+            t = {"height_mm": None, "on": None, "z_mm": 0, "moved_t": now, "moves": 0, "recent": deque(maxlen=25)}
+            self._name(t, d["color"])
             self._sighting(t, d, now)
             self.tracks.append(t)
         self.maybe = again
         for t in self.tracks:  # what was put on something goes where that goes
             base = next((b for b in self.tracks if b["id"] == t["on"]), None) if t["on"] else None
             if base:
-                t.update(x=base["x"], y=base["y"], pixel=base["pixel"], state=base["state"], seen_t=base["seen_t"], moved_t=max(t["moved_t"], base["moved_t"]))
+                t.update(x=base["x"], y=base["y"], u=base["u"], v=base["v"], pixel=base["pixel"], state=base["state"], seen_t=base["seen_t"], moved_t=max(t["moved_t"], base["moved_t"]))
             elif t["on"]:
                 t["on"], t["state"] = None, "missing"
 
@@ -244,7 +300,8 @@ class Watcher:
             if held:
                 held.update(state="held", on=None, z_mm=0)
         if held and gripping:
-            held.update(x=round(float(tcp[0]), 3), y=round(float(tcp[1]), 3), seen_t=now, moved_t=now, pixel=[round(float(c)) for c in self.cam.to_pixel(tcp)])
+            u, v = (float(c) for c in self.cam.to_pixel(tcp))
+            held.update(x=round(float(tcp[0]), 3), y=round(float(tcp[1]), 3), u=u, v=v, pixel=[round(u), round(v)], seen_t=now, moved_t=now)
         if not gripping and self.holding is not None:
             self.holding = None
             if held:  # let go: on whatever is right underneath, else on the table, and out of sight under the gripper for now
@@ -252,13 +309,15 @@ class Watcher:
                 base = min((t for t in self.tracks if t is not held and not t["on"] and _apart(t, held) < STACK_REACH), key=lambda t: _apart(t, held), default=None)
                 # how high the surface it was put on is: place_at opens the jaws with the tool point 22 mm above it
                 surface = max(0, round((float(tcp[2]) - self.table_z) * 1000 - 22)) if base is not None and tcp is not None else 0
-                held.update(state="hidden", misses=0, moved_t=now, on=base["id"] if base else None, z_mm=surface)
+                u, v = (float(c) for c in self.cam.to_pixel([held["x"], held["y"], self.table_z + surface / 1000 + 0.012]))  # about where its outline will be centred
+                held.update(state="hidden", misses=0, moved_t=now, moves=held["moves"] + 1, u=u, v=v, on=base["id"] if base else None, z_mm=surface)
 
     # ---- what goes out
 
     def _report(self, now: float) -> dict:
-        keys = ("id", "color", "state", "x", "y", "yaw_deg", "width_mm", "footprint_mm", "height_mm", "on", "z_mm", "pixel", "area_px")
+        keys = ("id", "color", "state", "x", "y", "yaw_deg", "width_mm", "footprint_mm", "height_mm", "on", "z_mm", "moves", "pixel", "area_px")
         tracks = [{**{k: t[k] for k in keys}, "still_s": round(now - t["moved_t"], 1), "seen_s": round(now - t["seen_t"], 1)} for t in self.tracks]
+        lying = [e for e in self.edge if e["looks"] >= 10 and e["unseen"] < 3]
         return {
             "t": round(now, 3),
             "mode": self.mode,
@@ -267,13 +326,16 @@ class Watcher:
             "holding": self.holding,
             "stopped_arm_t": self.stopped_arm_t,
             "tracks": tracks,
+            "at_edge": [dict(zip("xy", (round(float(c), 3) for c in self.cam.to_base(e["cx"], e["cy"])[:2])), area_px=round(e["area"])) for e in lying],
         }
 
-    def _picture(self, img: np.ndarray, intruders) -> np.ndarray:
+    def _picture(self, img: np.ndarray) -> np.ndarray:
         colours = {"visible": (120, 255, 120), "hidden": (160, 160, 160), "held": (80, 220, 255), "missing": (90, 90, 255)}
         marks = [{"label": f"{t['id']} {t['state']}" + (f" on {t['on']}" if t["on"] else ""), "point": t["pixel"], "bgr": colours[t["state"]],
                   "polygon": t["polygon"] if t["state"] == "visible" and not t["on"] else None} for t in self.tracks]  # fmt: skip
-        marks += [{"label": "INTRUSION", "box": list(b.box), "bgr": (0, 0, 255)} for b in intruders]
+        marks += [{"label": "at the edge: not tracked" if e["looks"] >= 10 else "", "box": e["box"], "bgr": (0, 160, 255) if e["looks"] >= 10 else (0, 0, 255)} for e in self.edge if not e["unseen"]]
+        if self.intrusion:
+            vision._label(img := img.copy(), f"INTRUSION: {self.intrusion['what']}", (8, 20), scale=0.55, color=(0, 0, 255))
         return vision.draw_marks(img, marks)
 
     def show(self, report: dict) -> None:
@@ -320,7 +382,7 @@ def main() -> None:
                 failing_since = failing_since or t0
                 if "not reachable" in str(e) and t0 - failing_since > 5.0:
                     raise SystemExit(f"the robot side is gone: {e}") from None
-                report, picture = {"t": round(t0, 3), "error": str(e), "clear_s": 0.0, "intrusion": None, "holding": None, "stopped_arm_t": None, "tracks": []}, None
+                report, picture = {"t": round(t0, 3), "error": str(e), "clear_s": 0.0, "intrusion": None, "holding": None, "stopped_arm_t": None, "tracks": [], "at_edge": []}, None
             report["stops_arm_on_intrusion"] = stop_on_intrusion
             _write(FILE, (json.dumps(report, indent=1) + "\n").encode())
             n += 1
@@ -344,13 +406,13 @@ def read() -> dict | None:
     return data if time.time() - data["t"] < 2.0 else None
 
 
-def start(stop_on_intrusion: bool = True) -> dict:
+def start() -> dict:
     """Make sure the tracker is running and return its first report."""
     data = read()
     if data is None:
         RUNTIME.mkdir(exist_ok=True)
         with open(RUNTIME / "tracker.log", "ab") as log:
-            subprocess.Popen([sys.executable, "-m", "util.tracker", *([] if stop_on_intrusion else ["--no-stop"])], cwd=ROOT / "tools",
+            subprocess.Popen([sys.executable, "-m", "util.tracker", *(["--no-stop"] if NO_STOP.exists() else [])], cwd=ROOT / "tools",
                              stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)  # fmt: skip
         deadline = time.time() + 15.0
         while data is None and time.time() < deadline:
@@ -406,16 +468,17 @@ def track(data: dict, name: str) -> dict:
 
 
 def wait_for(ctx, name: str | None = None, patience: float = 20.0, still: float = 0.6) -> dict | None:
-    """Wait until nothing is reaching into the work area and, if `name` is given, that object
-    is in view and lying still; returns its track. If it stays out of sight, the arm goes home
-    once, in case the arm is what hides it. Gives up with the reason after `patience` seconds."""
+    """Wait until the table is quiet (nothing moving that the arm did not move) and, if `name`
+    is given, that object is in view and lying still; returns its track. If it stays out of
+    sight, the arm goes home once, in case the arm is what hides it. Gives up with the reason
+    after `patience` seconds. A tracker told not to stop the arm is not waited on for quiet."""
     from home import home
 
     deadline, unseen_since, went_home, why = time.time() + patience, None, False, ""
     while time.time() < deadline:
         data = fresh()
-        if data["intrusion"] or data["clear_s"] < 1.0:
-            why, unseen_since = "something is reaching into the work area (a hand?)", None
+        if data["stops_arm_on_intrusion"] and (data["intrusion"] or data["clear_s"] < 0.3):
+            why, unseen_since = f"the work area is not quiet ({(data['intrusion'] or {}).get('what', 'something just moved')}): a hand?", None
             continue
         if name is None:
             return None

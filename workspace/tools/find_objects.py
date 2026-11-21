@@ -51,9 +51,14 @@ COLOUR_STEP, LIGHTER_STEP, DARKER_STEP = 14.0, 30.0, 70.0
 def color_name(img: np.ndarray, blob: vision.Blob) -> str:
     mask = np.zeros(img.shape[:2], np.uint8)
     cv2.fillPoly(mask, [np.array(blob.polygon, np.int32)], 255)
-    h, s, v = [float(np.median(c[mask > 0])) for c in cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))]
-    if s < 45:
-        return "white" if v > 170 else ("black" if v < 70 else "grey")
+    h, s, v = [c[mask > 0].astype(float) for c in cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))]
+    if np.median(s) < 45:
+        return "white" if np.median(v) > 170 else ("black" if np.median(v) < 70 else "grey")
+    # The hue of the more strongly coloured half, which is the object and not table seen through
+    # a hole in it, averaged as a direction: hue is a circle with red at both ends of the scale,
+    # and a plain median of a red thing lands in the middle, on green or blue.
+    turn = h[s >= np.median(s)] * (math.pi / 90)
+    h = math.degrees(math.atan2(np.sin(turn).mean(), np.cos(turn).mean())) / 2 % 180
     for name, lo, hi in (("red", 0, 8), ("orange", 8, 20), ("yellow", 20, 33), ("green", 33, 85), ("blue", 85, 130),
                          ("purple", 130, 160), ("pink", 160, 172), ("red", 172, 181)):  # fmt: skip
         if lo <= h < hi:

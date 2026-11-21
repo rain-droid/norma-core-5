@@ -31,9 +31,10 @@ the table's own colour and black things on the dark mat are not seen):
 
 What the errors mean:
 
-- "gave up after 20 s: something is reaching into the work area": a hand, or something large
-  lying across the edge of the searched area. If the image shows nothing there, the tracker is
-  wrong: `track_objects` with `stop_arm_on_intrusion: false`, and say so.
+- "gave up after 20 s: the work area is not quiet (...)": something keeps moving on the table:
+  a hand, or an object the tracker measures unsteadily. Open the image from `track_objects`.
+  If nobody is there, the tracker is wrong: `track_objects` with
+  `stop_arm_on_intrusion: false`, and say so.
 - "... is out of sight (hidden)": it is under the arm even at home, or under something else.
   Objects right in front of the base are hidden by the arm in the home pose.
 - "... is out of sight (missing)": it was taken away, or pushed out of the searched area.

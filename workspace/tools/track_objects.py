@@ -12,10 +12,17 @@ they act, so an object that has been moved since you looked is picked up where i
 The same numbers are in perception/exteroception/tracks.json, rewritten ten times a second;
 tracks.jpg beside it is the view. util/tracker.py is the process that writes them.
 
-`intrusion` is set while something large reaches into the work area over its edge (a hand, an
-arm), and `clear_s` says how long the area has been free. While something is reaching in, the
-tracker stops any motion of the arm. `stop_arm_on_intrusion: false` restarts the tracker
-without that, for when it stops the arm for no reason; say so to whoever is standing nearby.
+`intrusion` is set while something is moving on the table that the arm did not move: a thing
+coming in over the edge of the work area, something new appearing, a tracked object sliding.
+From this camera that is what a hand looks like. `clear_s` says how long the table has been
+quiet. While it is not quiet the tracker stops any motion of the arm; pick_object and
+place_object wait and carry on, other tools return a "stopped" error. A thing lying still is
+never an intrusion: a motionless hand is not seen as one.
+`stop_arm_on_intrusion: false` restarts the tracker without the stopping, for when it stops
+the arm for no reason; say so to whoever is standing nearby. It stays off until set to true.
+
+`at_edge` lists things lying across the edge of the searched area. They cannot be measured
+there or picked by name: move them in, or use capture_camera and pixel_to_table.
 
 `action: "stop"` ends the tracker. It also ends by itself when the robot side goes away.
 
@@ -35,9 +42,12 @@ def track_objects(ctx, action: str = "read", stop_arm_on_intrusion: bool | None 
     if action != "read":
         raise RobotError(f"action is 'read' or 'stop', not '{action}'")
     now = tracker.read()
-    if now and stop_arm_on_intrusion is not None and now["stops_arm_on_intrusion"] != stop_arm_on_intrusion:
-        tracker.stop()
-    data = tracker.start(stop_arm_on_intrusion is not False)
+    if stop_arm_on_intrusion is not None:
+        tracker.RUNTIME.mkdir(exist_ok=True)
+        (tracker.NO_STOP.unlink(missing_ok=True) if stop_arm_on_intrusion else tracker.NO_STOP.touch())
+        if now and now["stops_arm_on_intrusion"] != stop_arm_on_intrusion:
+            tracker.stop()
+    data = tracker.start()
     view = cv2.imread(str(tracker.FILE.with_suffix(".jpg")))
     return {
         "tracking": True,
@@ -47,6 +57,7 @@ def track_objects(ctx, action: str = "read", stop_arm_on_intrusion: bool | None 
         "stops_arm_on_intrusion": data["stops_arm_on_intrusion"],
         "holding": data["holding"],
         "tracks": [{k: v for k, v in t.items() if k not in ("pixel", "area_px")} for t in data["tracks"]],
+        "at_edge": data["at_edge"],
     }
 
 

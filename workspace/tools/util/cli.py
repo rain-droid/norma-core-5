@@ -21,6 +21,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from util import tracker
 from util.arm import Arm, RobotError
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -122,6 +123,8 @@ def call(function, arguments: dict | None = None) -> dict:
         result = dict(out) if isinstance(out, dict) else {"result": out}
     except RobotError as e:
         result = {"error": str(e), "error_kind": "robot"}
+        if tracker.stopped_by_tracker(e):
+            result["error"] += " The tracker stopped it, because something moved in the work area: see tools/track_objects.py."
     except Exception as e:  # a bug in a tool file: whoever edits it needs the traceback
         result = {"error": f"{type(e).__name__}: {e}", "error_kind": "tool_bug", "traceback": traceback.format_exc(limit=8)}
     result["history"] = str(history.relative_to(ROOT))
