@@ -28,7 +28,7 @@ uv run python scripts/calibrate.py --manual   # joint ranges (arm on 7.5 V: do n
 uv run python scripts/calibrate_camera.py --help  # camera lens/pose calibration (see below)
 ```
 
-Web UI (`web/`, React + three.js + Vite): `npm install && npm run dev` (port 5173, proxies `/api`, `/ws`, `/assets` to the daemon on 8765); `npm run build` writes `web/dist`, which the daemon serves at `/`; `npm run typecheck`.
+Web UI (`web/`, React + three.js + Vite): `npm install && npm run dev` (port 5173, proxies `/api`, `/ws`, `/assets` to the daemon on 8765; `ELROBOT_DAEMON=http://<host>:8765 ELROBOT_KEY=... npm run dev` for a daemon on another machine); `npm run build` writes `web/dist`, which the daemon serves at `/`; `npm run typecheck`.
 
 `ELROBOT_SIM`, `ELROBOT_VOICE`, `ELROBOT_PORT`, `ELROBOT_HOST`, `ELROBOT_KEY`, `ELROBOT_STATION` override `config.yaml`; every config key and its default lives in `src/elrobot/config.py` (unknown keys in `config.yaml` are an error).
 

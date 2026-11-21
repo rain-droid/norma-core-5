@@ -89,10 +89,13 @@ function robotAssetsFallback(): Plugin {
   };
 }
 
+/** Access key of a daemon on another machine (`elrobot up --lan` prints it). */
+const KEY = process.env.ELROBOT_KEY;
+const headers = KEY ? { 'X-Elrobot-Key': KEY } : undefined;
 const proxy = {
-  '/api': { target: DAEMON, changeOrigin: true },
-  '/assets': { target: DAEMON, changeOrigin: true },
-  '/ws': { target: DAEMON, ws: true, changeOrigin: true },
+  '/api': { target: DAEMON, changeOrigin: true, headers },
+  '/assets': { target: DAEMON, changeOrigin: true, headers },
+  '/ws': { target: DAEMON, ws: true, changeOrigin: true, headers },
 };
 
 export default defineConfig({
