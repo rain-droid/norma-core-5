@@ -2,15 +2,14 @@
 
 The robot takes joint angles only, so everything Cartesian is worked out here, in the
 workspace, and can be read and changed like any other tool code. The mathematics underneath
-(forward kinematics from the URDF, IK solved by pink) is the arm's kinematics library,
-`elrobot.kinematics`, at ../../../src/elrobot/kinematics.py.
+(forward kinematics from robot_config/model.urdf, IK solved by pink) is util/kinematics.py.
 
 Frames: metres in the base frame, origin on the table under the base, x to the robot's right,
 y forward, z up. The tool point (TCP) is between the finger pads. `pitch` is how far below
 horizontal the gripper points (90 = straight down); `yaw` turns the jaws about that direction.
 
-The robot side checks every joint command against the same clearance envelope used here, so a
-plan that slips through this file is refused there, not executed.
+The robot side checks every joint command against its own copy of the clearance envelope used
+here, so a plan that slips through this file is refused there, not executed.
 """
 
 import math
@@ -18,8 +17,8 @@ from pathlib import Path
 
 import numpy as np
 
-from elrobot.kinematics import IKResult, Kinematics, approach_from_pitch, jaw_from_yaw
 from util.arm import Arm, RobotError
+from util.kinematics import IKResult, Kinematics, approach_from_pitch, jaw_from_yaw
 from util.motion import READY_DEG
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -131,7 +130,7 @@ class Planner:
         elif refused and last is not None and "rejected" in last.reason:
             # reachable, but not allowed: most often a fingertip of leaning, turned jaws dipping
             # below the table, which a higher grasp or yaw 0 avoids
-            why = f"every pose that gets there was refused, most recently: {refused[-1]}. Try a larger grasp height, or yaw 0"
+            why = f"every pose that gets there was refused, most recently: {refused[-1]}. Try a larger grasp_height, or yaw_deg 0"
         else:
             why = last.describe() if last else "no approach found"
         raise RobotError(f"can't reach a grasp at x={target[0]:+.3f} y={target[1]:+.3f}: {why}")

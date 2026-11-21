@@ -1,8 +1,14 @@
 # The body
 
-`model.urdf` and `assets/` are the robot model (meshes in millimetres, scaled in the URDF).
+`model.urdf` and `assets/` are the robot model (meshes in millimetres, scaled in the URDF;
+licence in `MODEL_LICENSE`). `visuals/` is the joint manual in pictures: `jointN.jpg` shows
+joint N at -90, 0 and +90 degrees with every other joint at zero, what it carries in orange
+and its axis in cyan; `gripper.jpg` the jaws; `three_views.jpg` the ready pose. Look at a
+joint's picture before reasoning about which way it turns (`build_visuals.py` redraws them).
+
 To see the current posture, run `pixi run python tools/read_proprioception.py` and open the
 `body_image` it returns: the model at the measured angles from behind, from the right, from above.
+`sit_pose.json` is the folded pose the arm rests in (`tools/rest.py`).
 
 ## Frames
 
@@ -60,9 +66,9 @@ servo especially): trust a value only if it stays; it should stay under about 55
 
 Overload protection: a servo whose output stays above its threshold for 2 s drops to 20 % torque
 and reports status 32 until its torque is switched off and on, and the joint sags meanwhile. The
-threshold is stored in each servo. It is 60 % on the arm joints (`../scripts/servo_overload.py`
-shows and sets it); the Station's calibration puts it back to 25 %, which the shoulder exceeds
-on most lifts. Holding the arm stretched out keeps the shoulder near 35-45 %: go `home` or
+threshold is stored in each servo. It is 60 % on the arm joints; whoever runs the robot side
+sets it, and its calibration routine puts it back to 25 %, which the shoulder exceeds on most
+lifts. Holding the arm stretched out keeps the shoulder near 35-45 %: go `home` or
 `rest` between tasks. The robot side refuses joint commands while any servo reports a fault.
 
 Moves follow a trapezoidal speed profile. The servos trail a moving setpoint, more the faster it
@@ -73,6 +79,7 @@ degrees, which is why `home` defaults to that speed. Faster has been refused as 
 ## Kinematics
 
 `tools/util/planning.py` turns tool poses into joint angles: `solve` for one pose, `line` for
-a straight path, `approach_for` for a grasp. The solver underneath is pink (Pinocchio), in the
-arm's kinematics library at `../../src/elrobot/kinematics.py`; the robot side uses the same
-library for its clearance check, so change your copy of the planning, not that file.
+a straight path, `approach_for` for a grasp. Underneath is `tools/util/kinematics.py`: forward
+kinematics read from `model.urdf`, inverse kinematics solved by pink (Pinocchio). Both are
+this workspace's own and can be changed. The robot side has a separate copy for the clearance
+check it applies to every joint command, so nothing changed here loosens that.

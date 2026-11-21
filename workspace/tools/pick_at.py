@@ -14,11 +14,11 @@ x, y is the centre of the object where it stands on the table: measure it with t
 (find_objects, pixel_to_table). The jaws only centre an object along the direction they close
 in; along the finger pads it stays wherever x, y put it.
 
-`yaw` rotates the jaws about the vertical, degrees; 0 closes left-right. Pass the `yaw_deg`
-find_objects reported so the jaws close across a flat side. The jaws open 53 mm.
+`yaw_deg` rotates the jaws about the vertical, in degrees; 0 closes left-right. Pass the
+`yaw_deg` find_objects reported so the jaws close across a flat side. The jaws open 53 mm.
 `grasp_height` is where the tool point ends up above the table: about half the object's height,
 never less than 0.013 (the fingertips are 12 mm beyond the tool point). Beyond about 27 cm the gripper has to lean, and leaning jaws that are
-also turned (`yaw` not 0) dip one fingertip towards the table: such a grasp needs 0.020 or more.
+also turned (`yaw_deg` not 0) dip one fingertip towards the table: such a grasp needs 0.020 or more.
 
 `refine: true` adds a look through the wrist camera from the hover point and shifts x, y onto
 the outline nearest to where the target should appear (at most 5 cm, twice). Only use it once
@@ -33,8 +33,7 @@ import time
 
 import numpy as np
 
-from elrobot import vision
-from util import capture
+from util import capture, vision
 from util.arm import RobotError
 from util.motion import require_ready, tcp_report
 
@@ -56,7 +55,7 @@ def refine_target(ctx, target: np.ndarray, max_shift: float = 0.05) -> np.ndarra
     return np.array([p[0], p[1], target[2]])
 
 
-def pick_at(ctx, x: float, y: float, yaw: float | None = None, grasp_height: float = 0.018, refine: bool = False) -> dict:
+def pick_at(ctx, x: float, y: float, yaw_deg: float | None = None, grasp_height: float = 0.018, refine: bool = False) -> dict:
     arm, plan = ctx.arm, ctx.plan
     if require_ready(ctx, awake=True)["gripper"]["holding"]:
         raise RobotError("already holding something; place it first")
@@ -64,7 +63,7 @@ def pick_at(ctx, x: float, y: float, yaw: float | None = None, grasp_height: flo
     corrections = []
 
     # plan the whole approach before anything moves, so an impossible grasp is refused with the arm where it was
-    approach, pitch, q_hover, hover_pos, grasp = plan.approach_for(target, grasp_height, yaw)
+    approach, pitch, q_hover, hover_pos, grasp = plan.approach_for(target, grasp_height, yaw_deg)
     down = plan.line(q_hover, grasp, approach=approach, allow_low=True)
     arm.joints(gripper=1.0, label="opening")
     arm.joints(q_hover, speed=0.9, label="reaching")
@@ -76,7 +75,7 @@ def pick_at(ctx, x: float, y: float, yaw: float | None = None, grasp_height: flo
                 break
             corrections.append(round(shift * 1000, 1))
             target = better
-            approach, pitch, q_hover, hover_pos, grasp = plan.approach_for(target, grasp_height, yaw)
+            approach, pitch, q_hover, hover_pos, grasp = plan.approach_for(target, grasp_height, yaw_deg)
             down = plan.line(q_hover, grasp, approach=approach, allow_low=True)
             arm.joints(q_hover, speed=0.6, label="lining up")
     ctx.emit("markers", markers=[{"id": "target", "label": "pick", "pos": target.tolist(), "color": "#3ddc84", "radius": 0.014}])

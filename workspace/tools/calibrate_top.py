@@ -17,7 +17,8 @@ Not fitted here: `base_in_mat`, where the robot's base sits on the mat (x, y in 
 rotation in degrees). It was set by hovering the gripper over an object located with this
 camera and correcting until it was centred; it stays as it is in the file.
 
-The far tags only decode with a short exposure (scripts/camera_exposure.py 40, Station stopped).
+The far tags only decode with a short exposure, which is set on the robot side (in the
+repository that runs the daemon: scripts/camera_exposure.py 40, with the Station stopped).
 """
 
 import json
@@ -59,7 +60,7 @@ def calibrate_top(ctx, frames: int = 30) -> dict:
     missing = [i for i, v in seen.items() if not v]
     if missing:
         raise RobotError(f"tag(s) {missing} never decoded in {frames} frames; check they are uncovered and inside the image "
-                         "(the far ones need a short exposure, scripts/camera_exposure.py 40)")  # fmt: skip
+                         "(the far ones need a short exposure, set on the robot side)")  # fmt: skip
     corners = {i: np.median(v, axis=0) for i, v in seen.items()}
     centres = {i: c.mean(axis=0) for i, c in corners.items()}
     H, _ = cv2.findHomography(np.array([centres[i] for i in TAGS]), np.array([TAGS[i] for i in TAGS]))
