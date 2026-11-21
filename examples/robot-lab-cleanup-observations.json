@@ -1,0 +1,139 @@
+{
+  "note": "Regression annotations supplied by Codex after inspecting rendered baseline images. These are fixtures, not an automatic recognizer. Re-observe and reclassify after shuffling.",
+  "profiles": {
+    "so101": [
+      {
+        "label": "crumpled paper",
+        "decision": "trash",
+        "confidence": 0.96,
+        "bbox": [
+          430,
+          198,
+          28,
+          29
+        ],
+        "height_mm": 16,
+        "jaw_yaw_deg": null
+      },
+      {
+        "label": "empty snack wrapper",
+        "decision": "trash",
+        "confidence": 0.96,
+        "bbox": [
+          389,
+          239,
+          43,
+          53
+        ],
+        "height_mm": 5,
+        "jaw_yaw_deg": 90
+      },
+      {
+        "label": "computer mouse",
+        "decision": "keep",
+        "confidence": 0.96,
+        "bbox": [
+          474,
+          242,
+          61,
+          51
+        ],
+        "height_mm": 16,
+        "jaw_yaw_deg": null
+      },
+      {
+        "label": "pen",
+        "decision": "keep",
+        "confidence": 0.96,
+        "bbox": [
+          328,
+          239,
+          47,
+          68
+        ],
+        "height_mm": 4,
+        "jaw_yaw_deg": null
+      },
+      {
+        "label": "bin",
+        "decision": "bin",
+        "confidence": 0.96,
+        "bbox": [
+          416,
+          68,
+          122,
+          121
+        ],
+        "height_mm": 0,
+        "jaw_yaw_deg": null
+      }
+    ],
+    "elrobot": [
+      {
+        "label": "crumpled paper",
+        "decision": "trash",
+        "confidence": 0.96,
+        "bbox": [
+          394,
+          199,
+          28,
+          28
+        ],
+        "height_mm": 16,
+        "jaw_yaw_deg": null
+      },
+      {
+        "label": "empty snack wrapper",
+        "decision": "trash",
+        "confidence": 0.96,
+        "bbox": [
+          425,
+          240,
+          37,
+          47
+        ],
+        "height_mm": 5,
+        "jaw_yaw_deg": 90
+      },
+      {
+        "label": "computer mouse",
+        "decision": "keep",
+        "confidence": 0.96,
+        "bbox": [
+          454,
+          162,
+          57,
+          47
+        ],
+        "height_mm": 16,
+        "jaw_yaw_deg": null
+      },
+      {
+        "label": "pen",
+        "decision": "keep",
+        "confidence": 0.96,
+        "bbox": [
+          408,
+          288,
+          45,
+          64
+        ],
+        "height_mm": 4,
+        "jaw_yaw_deg": null
+      },
+      {
+        "label": "bin",
+        "decision": "bin",
+        "confidence": 0.96,
+        "bbox": [
+          284,
+          87,
+          122,
+          119
+        ],
+        "height_mm": 0,
+        "jaw_yaw_deg": null
+      }
+    ]
+  }
+}

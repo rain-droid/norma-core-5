@@ -1,0 +1,164 @@
+{
+  "label": "Recorded bench estimate",
+  "robot": "so101",
+  "status": "estimated_not_calibrated",
+  "resolution": [
+    853,
+    480
+  ],
+  "source": {
+    "overhead": "logs/current-preflight/overhead-1795292098745256000.jpg",
+    "wrist": "logs/current-preflight/wrist-1795292098748865000.jpg",
+    "state": "logs/current-preflight/state.json",
+    "camera_ids": {
+      "overhead": "0x21100000c456366",
+      "wrist": "0x21400000c456367"
+    }
+  },
+  "recorded_joints": {
+    "shoulder_pan": 0.7792622402459057,
+    "shoulder_lift": 0.030679615757712823,
+    "elbow_flex": -0.10124273200045232,
+    "wrist_flex": 1.6306215775224366,
+    "wrist_roll": 0.5399612373357456,
+    "gripper": -0.0015339807878856412
+  },
+  "overhead": {
+    "position_m": [
+      0.5758373318956507,
+      -0.004048214278759125,
+      0.5797408106691224
+    ],
+    "rotation_matrix": [
+      [
+        -0.16543866983199562,
+        -0.7726707070896109,
+        0.6128703165677549
+      ],
+      [
+        0.9806126123808773,
+        -0.19505283146400965,
+        0.018796206463639553
+      ],
+      [
+        0.10501881242792188,
+        0.6040979815754336,
+        0.7899599215736932
+      ]
+    ],
+    "fovy_deg": 38.63091715439495
+  },
+  "wrist": {
+    "body": "camera_optical_frame",
+    "rotation_matrix": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        -1.0
+      ]
+    ],
+    "fovy_deg": 58.0,
+    "position_m": [
+      0,
+      0,
+      0
+    ]
+  },
+  "fit": {
+    "method": "manual CAD joint-center correspondences; centered pinhole; square pixels; weak 60 degree FOV prior",
+    "landmarks": [
+      {
+        "body": "base_link",
+        "pixel": [
+          455.0,
+          166.0
+        ],
+        "model_world_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "residual_px": 6.588961943661391
+      },
+      {
+        "body": "upper_arm_link",
+        "pixel": [
+          439.0,
+          103.0
+        ],
+        "model_world_m": [
+          0.0476175501318606,
+          -0.03436672691174352,
+          0.11659990880495702
+        ],
+        "residual_px": 5.1898652075520335
+      },
+      {
+        "body": "lower_arm_link",
+        "pixel": [
+          423.0,
+          18.0
+        ],
+        "model_world_m": [
+          0.06998474546224884,
+          -0.056461122715384955,
+          0.2282580976991187
+        ],
+        "residual_px": 3.080288447266929
+      },
+      {
+        "body": "wrist_link",
+        "pixel": [
+          276.0,
+          60.0
+        ],
+        "model_world_m": [
+          0.16545788633560643,
+          -0.15076860813032955,
+          0.24295597395679727
+        ],
+        "residual_px": 8.225593806507739
+      },
+      {
+        "body": "gripper_link",
+        "pixel": [
+          297.0,
+          122.0
+        ],
+        "model_world_m": [
+          0.17864457833143016,
+          -0.13835265453540696,
+          0.18185953174830194
+        ],
+        "residual_px": 5.161349246786561
+      },
+      {
+        "body": "tool0",
+        "pixel": [
+          299.0,
+          207.0
+        ],
+        "model_world_m": [
+          0.17943980085479116,
+          -0.13913735539242442,
+          0.07786553256708312
+        ],
+        "residual_px": 1.5854948368497368
+      }
+    ],
+    "rms_px": 5.426033091811229,
+    "held_out_validation": false,
+    "lens_distortion": "unknown; not fitted",
+    "warning": "Manual approximate joint centers, encoder/model geometry and one image do not establish metric camera calibration. FOV is underconstrained. The wrist pose is nominal CAD, not a hand-eye calibration."
+  }
+}

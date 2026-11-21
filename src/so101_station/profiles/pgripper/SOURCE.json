@@ -1,0 +1,20 @@
+{
+  "repository": "https://github.com/AtharvaBhorpe/so_arm101_pgripper",
+  "revision": "c79830e72ec5de71ad586f6119a3be0405d51b4c",
+  "robot_id": "so_arm101_pgripper_follower",
+  "variant": "SO-ARM101 follower with NormaCore pgripper",
+  "files": {
+    "calibration.json": "config/hardware/so_arm101_pgripper_follower.json",
+    "state.yaml": "config/hardware/so_arm101_pgripper_follower.state.yaml",
+    "control.yaml": "config/hardware/so_arm101_pgripper_follower.control.yaml",
+    "joint_limits.yaml": "config/hardware/so_arm101_pgripper_follower.joint_limits.yaml",
+    "canonical_joint_limits.yaml": "src/so_arm101_pgripper_description/config/canonical_joint_limits.yaml",
+    "LICENSES/Apache-2.0.txt": "src/so_arm101_pgripper_description/LICENSES/Apache-2.0.txt",
+    "ATTRIBUTION.md": "src/so_arm101_pgripper_description/ATTRIBUTION.md",
+    "LICENSES/MIT.txt": "src/so_arm101_pgripper_description/LICENSES/MIT.txt",
+    "model/so101_arm_macro.xacro": "src/so_arm101_pgripper_description/urdf/so101_arm_macro.xacro",
+    "model/pgripper_macro.xacro": "src/so_arm101_pgripper_description/urdf/pgripper_macro.xacro",
+    "model/so_arm101_pgripper.urdf.xacro": "src/so_arm101_pgripper_description/urdf/so_arm101_pgripper.urdf.xacro"
+  },
+  "notes": "Imported unchanged apart from local filenames. These are machine-specific measurements; compare live EEPROM through Station before using them for motion."
+}

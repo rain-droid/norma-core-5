@@ -1,0 +1,14 @@
+{
+  "sim_only": false,
+  "camera_fixed": true,
+  "camera_id": "REPLACE_WITH_THE_FIXED_STATION_CAMERA_ID",
+  "image_size": null,
+  "pixel_points": [],
+  "table_points_m": [],
+  "workspace_polygon_m": [],
+  "drop_xy_m": null,
+  "table_z_m": 0.0,
+  "grasp_tip_z_m": 0.008,
+  "travel_z_m": 0.075,
+  "drop_tip_z_m": 0.04
+}
