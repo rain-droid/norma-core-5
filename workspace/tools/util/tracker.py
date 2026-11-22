@@ -491,14 +491,27 @@ def track(data: dict, name: str) -> dict:
     raise RobotError(f"no tracked object named '{name}'. There are: {', '.join(t['id'] + ' (' + t['state'] + ')' for t in data['tracks']) or 'none'}")
 
 
-def wait_for(ctx, name: str | None = None, patience: float = 20.0, still: float = 0.6) -> dict | None:
+def uncover(ctx, t: dict, step: int) -> None:
+    """Get the arm out of the camera's line to an object. First home. If that is not enough the
+    object is in front of the base, where the home pose stands over it: then the home pose
+    turned aside at the base, away from the object."""
+    from home import home
+    from util.motion import READY_DEG
+
+    if step == 0:
+        ctx.call(home)
+    else:
+        q = np.radians(READY_DEG)
+        q[0] = -1.2 if t["x"] < 0 else 1.2  # positive turns towards the robot's left, where x is negative
+        ctx.arm.joints(q, speed=0.5, label="turning aside")
+
+
+def wait_for(ctx, name: str | None = None, patience: float = 25.0, still: float = 0.6) -> dict | None:
     """Wait until the table is quiet (nothing moving that the arm did not move) and, if `name`
     is given, that object is in view and lying still; returns its track. If it stays out of
-    sight, the arm goes home once, in case the arm is what hides it. Gives up with the reason
-    after `patience` seconds. A tracker told not to stop the arm is not waited on for quiet."""
-    from home import home
-
-    deadline, unseen_since, went_home, why = time.time() + patience, None, False, ""
+    sight, the arm gets out of the way (uncover), in case the arm is what hides it. Gives up
+    with the reason after `patience` seconds. A tracker told not to stop the arm is not waited on for quiet."""
+    deadline, unseen_since, steps, why = time.time() + patience, None, 0, ""
     while time.time() < deadline:
         data = fresh()
         if data["stops_arm_on_intrusion"] and (data["intrusion"] or data["clear_s"] < 0.3):
@@ -512,10 +525,10 @@ def wait_for(ctx, name: str | None = None, patience: float = 20.0, still: float 
         if t["state"] != "visible":
             why = f"{name} is out of sight ({t['state']}), last measured at x={t['x']:+.3f} y={t['y']:+.3f}"
             unseen_since = unseen_since or time.time()
-            if time.time() - unseen_since > 1.0 and not went_home:
+            if time.time() - unseen_since > 1.0 and steps < 2:
                 try:
-                    ctx.call(home)
-                    went_home = True
+                    uncover(ctx, t, steps)
+                    steps, unseen_since = steps + 1, None
                 except RobotError as e:
                     if not stopped_by_tracker(e):
                         raise

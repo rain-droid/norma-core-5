@@ -14,8 +14,8 @@ What this adds:
   arm is in the way) and compares. On the table, it must lie within 40 mm of x, y. On another
   object, it must not be lying anywhere else, and the pile must look taller or bigger than
   what was underneath did alone;
-* if that check fails and the object is in view, it is picked up and placed again, `retries`
-  times (default 1).
+* if that check fails it looks from the side for where the object went, picks it up and places
+  it again, `retries` times (default 1).
 
 Stacking needs the height of what is underneath: its measured `height_mm`, or `z` if you know
 better (the measurement tends to read up to a centimetre high on the real arm).
@@ -29,7 +29,6 @@ import time
 
 import numpy as np
 
-from home import home
 from pick_object import pick_object
 from place_at import RELEASE_ABOVE
 from util import tracker
@@ -41,21 +40,20 @@ NEAR_ENOUGH = 0.04  # metres from x, y that still counts as placed there: the re
 
 def settle(ctx, name: str) -> tuple[dict, dict]:
     """The tracker's report and this object's track once the camera has seen where it lies."""
-    went_home, t0 = False, time.time()
+    steps, since, t0 = 0, time.time(), time.time()
     while True:
         data = tracker.fresh()
         t = tracker.track(data, name)
         if t["state"] != "hidden" and t["still_s"] > 0.5 and not data["intrusion"]:
             return data, t
-        if time.time() - t0 > 0.4 and not went_home:
-            went_home = True
+        if steps < 2 and time.time() - since > (0.4, 1.5)[steps]:
             try:
-                ctx.call(home)  # the arm is what hides it
+                tracker.uncover(ctx, t, steps)  # the arm is what hides it
+                steps, since = steps + 1, time.time()
             except RobotError as e:
                 if not tracker.stopped_by_tracker(e):
                     raise
-                went_home = False
-        if time.time() - t0 > 20.0:
+        if time.time() - t0 > 25.0:
             raise RobotError(f"{name} was put down but stays out of the camera's sight; last known at x={t['x']:+.3f} y={t['y']:+.3f}")
 
 
@@ -121,6 +119,15 @@ def place_object(ctx, object: str = "", on: str = "", x: float | None = None, y:
         # a pile stands taller in the image than its base did; one whose top object is small can be no larger in area
         grew = pile["box"][1] < under["box"][1] - 6 or pile["area_px"] > 1.2 * under["area_px"]
         good = t["on"] == on and pile["state"] == "visible" and grew
+        if not good and t["on"] == on:
+            # No taller: it may have slid off behind the pile, where the arm at home hides it. Look from the side.
+            try:
+                tracker.uncover(ctx, pile, 1)
+            except RobotError as e:
+                if not tracker.stopped_by_tracker(e):
+                    raise
+            time.sleep(1.0)
+            t = tracker.track(tracker.fresh(), mine)
         problem = f"{mine} is not on {on}: " + (f"it lies at x={t['x']:+.3f} y={t['y']:+.3f}" if t["on"] != on else f"{on} looks no taller than before, so it may have fallen out of view")
     else:
         good = t["state"] == "visible" and off < NEAR_ENOUGH
