@@ -15,6 +15,7 @@ the NormaCore ElRobot arm. On the second day we added an SO-101 arm to the same 
 | Cameras | top camera, one wrist camera on each arm, one Orbbec depth camera |
 | Agents we used | Claude Code, Codex, pi |
 | Interface to the robot | joint commands only |
+| Chat | text and voice, in English, German and French |
 
 ## Contents
 
@@ -25,14 +26,15 @@ the NormaCore ElRobot arm. On the second day we added an SO-101 arm to the same 
 5. [Zero-shot: the rubber ring](#zero-shot-the-rubber-ring)
 6. [Recovery becomes a skill](#recovery-becomes-a-skill)
 7. [What the agent sees](#what-the-agent-sees)
-8. [One demonstration, then the agent repeats it](#one-demonstration-then-the-agent-repeats-it)
-9. [Ablations](#ablations)
-10. [Two arms in one space](#two-arms-in-one-space)
-11. [The SO-101 with a decision model](#the-so-101-with-a-decision-model)
-12. [What did not work](#what-did-not-work)
-13. [What we learned](#what-we-learned)
-14. [Technology](#technology)
-15. [Run it](#run-it)
+8. [Talk to the robot](#talk-to-the-robot)
+9. [One demonstration, then the agent repeats it](#one-demonstration-then-the-agent-repeats-it)
+10. [Ablations](#ablations)
+11. [Two arms in one space](#two-arms-in-one-space)
+12. [The SO-101 with a decision model](#the-so-101-with-a-decision-model)
+13. [What did not work](#what-did-not-work)
+14. [What we learned](#what-we-learned)
+15. [Technology](#technology)
+16. [Run it](#run-it)
 
 ## The idea
 
@@ -213,6 +215,53 @@ on it.
 | Distance between two mat tags | 2 mm different | 585 mm (ruler) |
 | Flatness of the mat | 1.6 to 1.8 mm | |
 | Position of three objects | 7 to 11 mm different | top camera |
+
+## Talk to the robot
+
+The person does not need a terminal. The web UI has a chat box and a microphone. Type, or hold the space bar
+(or the talk button) and speak, or turn on hands-free and speak. The robot answers in speech and moves the arm.
+
+**Text chat and voice chat both work in English, German and French.** Speak or type in one of the three
+languages, and the robot replies in that language.
+
+![The web UI: the voice dock at the bottom, the chat timeline on the left](docs/images/two_arm/webui_two_arms.jpg)
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant D as Daemon
+    participant A as Agent (Claude Agent SDK, in workspace/)
+    participant R as Robot
+    B->>D: POST /api/voice/utterance (recorded audio)
+    D->>D: voice activity check (Silero), speech to text (Parakeet v3, finds the language)
+    D->>A: the text, as a chat turn
+    A->>R: runs the workspace tools: joint commands
+    A-->>D: reply text, in the language of the person
+    D->>D: text to speech (Phonon, multilingual)
+    D-->>B: chat, voice_state and speech events on /ws, then the WAV
+```
+
+| Part | What it does |
+|---|---|
+| Browser | records the microphone, plays the reply; shows the state: listening, transcribing, thinking, speaking, acting |
+| Languages | English, German and French, in text chat and in voice chat (`ELROBOT_LANGUAGES`, default `en,fr,de`); the reply comes in the language that the person used |
+| Speech to text | NVIDIA Parakeet TDT 0.6B v3 through onnxruntime, local; it finds the language itself; Whisper as a fallback |
+| Voice activity | Silero VAD: audio that is only noise starts no turn |
+| Agent | Claude Agent SDK in the same workspace, with the same tools and skills as a coding agent; a faster fallback model if the main model is not available |
+| Text to speech | Phonon (Gradium), local; the 40M multilingual model speaks English, German and French |
+| Stop | `POST /api/chat/interrupt` stops the turn and the robot; the STOP button in the UI does the same |
+| API | `POST /api/chat`, `POST /api/voice/utterance`, `GET /api/voice/audio/{id}.wav`; details in `docs/API.md` |
+
+What we measured:
+
+| Test | Result |
+|---|---|
+| Typed request, agent replies | reply after 1.1 s, with a speech clip |
+| Request to look at the table on the real cameras | the agent ran `describe_objects`, named the objects, and replied after 3.7 s |
+| Speech to text on a recorded clip | the text came back exactly |
+| Speech through the browser, end to end | team use during the hackathon; no recorded measurement |
+
+The license of the 40M multilingual Phonon model is CC BY-NC: not for commercial use.
 
 ## One demonstration, then the agent repeats it
 
@@ -426,7 +475,7 @@ must use the same commands each time, and for corrections that must stay.
 | Depth | Orbbec SDK version 1, built from source |
 | Daemon | Python 3.12, FastAPI, uvicorn, WebSocket, MCP server |
 | Web UI | React, three.js, urdf-loader (digital twin of the two arms) |
-| Speech | Parakeet v3 (speech to text), Phonon (text to speech) |
+| Speech | Parakeet v3 (speech to text), Silero VAD, Phonon (text to speech), Whisper as a fallback; English, German and French |
 | Environment and tests | pixi, uv, pytest, a simulator of the arm and the table |
 
 ## Run it
