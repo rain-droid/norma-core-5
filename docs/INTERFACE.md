@@ -64,7 +64,7 @@ pixi run python tools/NAME.py --schema
 
 | Member | What |
 |---|---|
-| `ctx.arm` | `util/arm.py` `Arm`: `state()`, `meta()`, `q()`, `limits()`, `frame(camera)`, `joints(path, gripper=, speed=, check=, allow_low=, label=)`, `torque(bool)`, `stop()` |
+| `ctx.arm` | `util/arm.py` `Arm`: `state()`, `meta()`, `q()`, `limits()`, `frame(camera)`, `joints(path, gripper=, speed=, check=, allow_low=, label=, retry_blocked=)`, `torque(bool)`, `stop()` |
 | `ctx.plan` | `util/planning.py` `Planner`: `fk`, `solve`, `reach`, `line`, `approach_for`, `blocked`, `table_z` |
 | `ctx.frame(camera)` | newest BGR frame |
 | `ctx.save_image(name, img, caption)`, `ctx.save_json(name, obj)` | into this call's history folder |
@@ -111,6 +111,19 @@ and its images. A capture's folder name is its `image_id`.
 - `check: false` skips the clearance envelope; `allow_low: true` lets the fingertips reach the table surface.
 - Returns `{"ok": true, "joints": [...], "gripper": {"open", "width_mm", "holding"}, "tcp": {"pos", "quat", "approach"}}`, or `{"ok": false, "error": "..."}` with the reason: outside limits, outside the envelope, blocked joint, servo fault.
 - The call returns when the motion has finished. `POST /api/stop` halts a motion; killing the caller does not.
+
+The daemon tries nothing twice. `Arm.joints` does, for one error: a move answered with `blocked: ...` is sent
+once more as a second `POST /api/joints`, with the waypoints still ahead of where the arm stopped, `speed`
+multiplied by `blocked_retry_speed` (never below 0.05, the daemon's floor) and `label` ending in
+`(again, slower)`. If that goes through, the result carries `retried_blocked`: the first refusal's text. If
+not, the second error is raised. `retry_blocked=False` on a call switches it off for that call.
+
+`workspace/robot_config/motion.json`:
+
+| Key | Meaning |
+|---|---|
+| `blocked_retry_speed` | Fraction of its speed at which a blocked move is sent again, 0 to 1. Default 0.5; 1 is the same speed again; 0 is no second try. Missing file or key: 0.5. Anything else: no second try, and the error says why. Read each time a move is blocked. |
+| `note` | The same in words, for whoever opens the file. Not read. |
 
 Reads: `GET /api/state` (`connected`, `calibrated`, `torque`, `joints[]` with `q`, `lower`, `upper`, `load`,
 `temp`, `error`; `gripper`; `ee`; `cameras[]` with `name`, `width`, `height`, `age_ms`), `GET /api/meta`
@@ -190,6 +203,12 @@ Signatures as of 2026-11-22; `--schema` on a tool is always current.
 | `rest` | - | Fold the arm into its resting seat and switch the motors off. |
 | `stop` | - | Halt all motion now and hold position. Always allowed, even while another tool is running. |
 | `track_objects` | `action: str = 'read', on_intrusion: str \| None = None` | Live tracking of what is on the table: read it, and start or stop it. |
+
+## Testing without a robot
+
+`workspace/tests/` holds tests of workspace code that need neither arm nor simulator: `util.arm._request` is
+replaced by a fake daemon that answers from a list (`test_blocked_retry.py`). They run in the workspace's own
+interpreter: `cd workspace && uv run --with pytest pytest -q tests`. The root `pytest` keeps to `tests/`.
 
 ## Testing against the simulator
 
