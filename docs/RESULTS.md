@@ -1,24 +1,25 @@
 # What was seen and measured on 22 November 2026
 
-Pictures and numbers from the afternoon on the real table: the ElRobot, the SO-101 beside it, the top camera,
-the two wrist cameras and the Orbbec depth camera across the table. What each part is and how to run it is in
-`docs/SECOND_ARM.md`; this page is the record. Every picture is from the real setup.
+This page shows the pictures and the numbers from the afternoon on the real table. The parts were the ElRobot,
+the SO-101 beside it, the top camera, the two wrist cameras and the Orbbec depth camera across the table.
+`docs/SECOND_ARM.md` tells you what each part is and how to run it. This page is the record. Every picture is
+from the real setup.
 
 ## The web UI and the digital twin
 
-Both arms in one 3D view, each moving with its real joint angles. The ElRobot is yellow with its wrist camera
-dark on the gripper; the SO-101 is dark with orange jaws. The labels are the heights of the things the depth
-camera found in the last scan.
+One 3D view shows both arms. Each arm moves with its real joint angles. The ElRobot is yellow, and its wrist
+camera is dark on the gripper. The SO-101 is dark and has orange jaws. The labels are the heights of the things
+that the depth camera found in the last scan.
 
 ![Both arms and the scanned things in the web UI's 3D view](images/two_arm/webui_two_arms.jpg)
 
-A hand-over that failed, as the UI shows it: the timeline entry turns red with the tool's own words, and the
-twin shows where the two grippers stood, the SO-101's jaws at the ElRobot's fingers.
+This is how the web UI shows a hand-over that failed. The timeline entry becomes red and shows the exact words
+of the tool. The twin shows where the two grippers stood. The SO-101's jaws were at the ElRobot's fingers.
 
 ![The web UI after a failed hand-over](images/two_arm/webui_handover_failed.jpg)
 
-The camera panel enlarged, on the top camera, with its layers switched on: detected objects, the mat's corner
-tags, the robot's frame and reach, the arm's joints.
+The picture shows the enlarged camera panel. The panel is on the top camera, and its layers are on. The layers
+are the detected objects, the mat's corner tags, the robot's frame and reach, and the arm's joints.
 
 ![The camera panel with its layers](images/two_arm/webui_camera_panel.jpg)
 
@@ -30,13 +31,13 @@ tags, the robot's frame and reach, the arm's joints.
 
 ## The depth camera
 
-The raw depth picture, 640x400, near to far from blue to red; black is where the sensor saw nothing. The mat
-is the large flat area, the two arms stand at its far edge.
+The raw depth picture is 640x400. The colours go from blue for near to red for far. Black shows where the
+sensor saw nothing. The mat is the large flat area. The two arms stand at the far edge of the mat.
 
 ![Raw depth picture](images/two_arm/depth_raw.jpg)
 
-Calibration: the mat's plane from the depth picture gives height and tilt, the two corner tags on the robot's
-side (circled in the camera's colour picture) give the rest.
+For the calibration, the mat's plane from the depth picture gives the height and the tilt. The two corner tags
+on the robot's side give the rest. The camera's colour picture shows a circle around each of these tags.
 
 ![The tags the depth camera was fitted to](images/two_arm/depth_calibration_tags.jpg)
 
@@ -50,12 +51,13 @@ side (circled in the camera's colour picture) give the rest.
 | The pink block (27 mm) | read 27 mm |
 | A scan | about 2 s |
 
-The first height map (12:19): the table from above, the base at the bottom, coloured by height. The arm over
-the mat is the red patch.
+The first height map (12:19) shows the table from above, with the base at the bottom. The colour shows the
+height. The red patch is the arm over the mat.
 
 ![The first height map](images/two_arm/depth_first_scan.jpg)
 
-Positions against the top camera's, same objects, same moment:
+The table compares the positions from the depth camera with the positions from the top camera. The objects
+and the moment are the same:
 
 | Object | Top camera x, y (m) | Depth camera x, y (m) | Apart | Height, top camera | Height, depth |
 |---|---|---|---|---|---|
@@ -63,14 +65,15 @@ Positions against the top camera's, same objects, same moment:
 | pink block | -0.082, 0.279 | -0.072, 0.284 | 11 mm | 28 mm | 27 mm |
 | cyan sponge | -0.180, 0.223 | -0.173, 0.226 | 8 mm | 33 mm | 19 mm |
 
-The depth camera reads about 8 mm further right than the top camera. On the sponge's height the two disagree;
-the depth camera's is the direct measurement.
+The depth camera reads about 8 mm further right than the top camera. The two cameras disagree on the height of
+the sponge. The depth camera's height is the direct measurement.
 
 ### Which things can be picked, from the depth map
 
-The height map at the end of the afternoon, and the same map with the ElRobot cut out and each thing marked by
-which arm could pick it: within the ElRobot's 36 cm or the SO-101's 30 cm, at least 15 mm tall, and at most
-48 mm across its narrow side (the jaws open 53 mm).
+The two pictures show the height map at the end of the afternoon and the same map with the ElRobot cut out.
+On the second map, a mark on each thing shows which arm can pick it by these limits. The thing is within the
+ElRobot's 36 cm or the SO-101's 30 cm. The thing is at least 15 mm tall. The thing is at most 48 mm across its
+narrow side (the jaws open 53 mm).
 
 | Heights | Pickable by |
 |---|---|
@@ -85,17 +88,17 @@ which arm could pick it: within the ElRobot's 36 cm or the SO-101's 30 cm, at le
 | 0.216 | 0.420 | 12 | 160 x 40 | too wide or flat |
 | 0.113 | 0.129 | 9 | 152 x 51 | too wide or flat |
 
-This marking is made from height and size alone, and it shows: it takes a cable for an object. The names in
-brackets are from looking at the colour picture.
+The marking uses height and size only, and the result shows this: the marking treats a cable as an object. The
+names in brackets come from a look at the colour picture.
 
 ## Obstacles, and the moves that were refused
 
-What `scan_obstacles` keeps: the height map with both arms cut out (the two dark patches), each thing with
-its height.
+The picture shows what `scan_obstacles` keeps. This is the height map with both arms cut out (the two dark
+patches). Each thing has its height.
 
 ![The obstacle map](images/two_arm/obstacles_map.jpg)
 
-The refusals, in the tools' own words:
+The table shows the refusals in the exact words of the tools:
 
 | When | What was asked | The answer |
 |---|---|---|
@@ -104,35 +107,36 @@ The refusals, in the tools' own words:
 | 15:10 | SO-101 to the cube while the ElRobot rests with its gripper over the mat | `second arm not moving: on the way this arm's gripper and the second arm's wrist camera would come within 19 mm of each other. Move this arm away first (home or rest), or go another way.` |
 | 15:17 | SO-101 from home to the cube, past the ring | `second arm not moving: on the way the second arm's gripper would hit the thing 21 mm tall at x=+0.222 y=+0.246. Go over it or another way; if it has been moved since, scan again (tools/scan_obstacles.py).` |
 
-The carry at 14:44 went through after the lift-over rule was added (three waypoints: up, across, down), and
-the SO-101's move at 15:17 after it got the same rule.
+The carry at 14:44 went through after the lift-over rule was added (three waypoints: up, across, down). The
+SO-101's move at 15:17 went through after the SO-101 got the same rule.
 
-Other errors met on the way:
+These other errors occurred during the work:
 
 | Error | Cause | What was done |
 |---|---|---|
 | Depth stream stops after three pictures | the kernel's 16 MB limit on USB transfer memory, shared with the Station's three cameras | raised to 256 MB (`scripts/orbbec_setup.sh` says how) |
-| No Orbbec device found | the current SDK does not know this sensor's protocol; the old one's Linux wheel holds macOS libraries | the old SDK built from source |
-| Wrist camera at 640x480 after a replug (Station error -51) | the camera refuses 1280x720 until it has streamed it once through the kernel driver | `scripts/cameras_ready.sh` does that |
-| `the second arm closed on nothing` | jaws 14 to 17 mm too low: rising, the SO-101 stops short | corrected from its own joint readings |
+| No Orbbec device found | the current SDK does not know this sensor's protocol; the Linux wheel of the old SDK holds macOS libraries | the old SDK built from source |
+| Wrist camera at 640x480 after a replug (Station error -51) | the camera refuses 1280x720 until it streams 1280x720 once through the kernel driver | `scripts/cameras_ready.sh` does that |
+| `the second arm closed on nothing` | jaws 14 to 17 mm too low: the SO-101 stops short when it rises | corrected from its own joint readings |
 | `HTTP 500 for /api/joints` | a command to the Station timed out once | sent again |
-| `second arm, home: blocked: joint 1 is 42 deg behind` | the SO-101 ran into the tape roll on the table | the collision and obstacle checks came after this |
+| `second arm, home: blocked: joint 1 is 42 deg behind` | the SO-101 hit the tape roll on the table | the collision check and the obstacle check came after this |
 | A crash on every ElRobot move with the SO-101 unplugged | the collision check read an empty joint list | fixed: an unplugged second arm is skipped |
 
 ## The hand-over
 
-The ElRobot holds the cube by its top; the SO-101 comes up from below and closes on the lower half. Above, a
-grip that missed (the jaws beside the cube); below, one that worked. Left the front view, right the ElRobot's
-wrist camera looking down past its fingers.
+The ElRobot holds the cube by its top. The SO-101 comes up from below and closes on the lower half. The upper
+part of the picture shows a grip that missed (the jaws are beside the cube). The lower part shows a grip that
+worked. The left side is the front view. The right side is the view from the ElRobot's wrist camera, which
+looks down past the ElRobot's fingers.
 
 ![A missed and a successful grip](images/two_arm/handover_grip_missed_and_worked.jpg)
 
-Done: the SO-101 holds the cube, the ElRobot is back at home with its gripper empty.
+The hand-over is done. The SO-101 holds the cube. The ElRobot is back at home, and its gripper is empty.
 
 ![After the hand-over](images/two_arm/handover_done.jpg)
 
-From the poses shown by hand, the arms meet nose to nose. The ElRobot's wrist camera after it let go and drew
-back: the cube in the SO-101's orange jaws.
+From the poses shown by hand, the arms meet nose to nose. The picture is from the ElRobot's wrist camera after
+the ElRobot released the cube and moved back. The picture shows the cube in the SO-101's orange jaws.
 
 ![The cube in the SO-101's jaws, seen by the ElRobot's wrist camera](images/two_arm/handover_shown_poses_wrist.jpg)
 
@@ -147,22 +151,23 @@ back: the cube in the SO-101's orange jaws.
 |---|---|
 | Room each side of a 30 mm cube in jaws that open 53 mm | 11 mm |
 | Fit of the SO-101's position (six places, in the air) | 4 to 8 mm |
-| SO-101 stopping short when it rises | 8 to 18 mm, corrected to within 5 mm |
-| ElRobot returning to a shown pose | 2 mm, once 17 mm |
-| SO-101 returning to a shown pose | 1 to 2 mm |
+| The SO-101 stops short when it rises | 8 to 18 mm, corrected to within 5 mm |
+| The ElRobot's return to a shown pose | 2 mm, once 17 mm |
+| The SO-101's return to a shown pose | 1 to 2 mm |
 | How the cube sits in the ElRobot's fingers | about 10 mm |
 | One hand-over | 53 to 80 s |
 
 ## Stacking with the second arm
 
-Not achieved. The SO-101 was to pick the cube off the mat and set it on the sponge. Where its joints say its
-jaws are is 2.5 to 4.5 cm from where they are at the table, so the top camera corrects it. This is what that
-camera has to go by: the gripper (circled where the joints put it) is mostly under its own camera, and only a
-sliver of orange shows.
+Not achieved. The task of the SO-101 was to pick the cube off the mat and set it on the sponge. The jaw
+position from the SO-101's joints is 2.5 to 4.5 cm from the real jaw position at the table. Thus the top camera
+corrects the jaw position. The picture shows what the top camera has for this correction. The gripper is mostly
+under its own camera, and only a thin strip of orange shows. A circle shows where the joints put the gripper.
 
 ![The top camera's view of the SO-101's gripper](images/two_arm/stacking_top_camera.jpg)
 
-The result of the better of the two placings: the cube beside the sponge, leaning on it.
+The picture shows the result of the better of the two placings. The cube is beside the sponge and leans on the
+sponge.
 
 ![The cube set down beside the sponge](images/two_arm/stacking_result.jpg)
 
@@ -174,9 +179,10 @@ The result of the better of the two placings: the cube beside the sponge, leanin
 
 ## The run log
 
-Every calibration, hand-over and stacking call of the afternoon, from the call history
-(`workspace/tool_call_history/`, not in the repository). The early hand-over failures are the tool being
-built: no reachable spot, the pink block hidden in the fingers, the SO-101 with no level pose near its base.
+The table shows every calibration call, hand-over call and stacking call of the afternoon. The data comes from
+the call history (`workspace/tool_call_history/`, not in the repository). The early hand-over failures are from
+the build of the tool: no reachable spot, the pink block hidden in the fingers, the SO-101 with no level pose
+near its base.
 
 | Time | Tool | Method | Result | Seconds | Detail |
 |---|---|---|---|---|---|
@@ -217,12 +223,14 @@ built: no reachable spot, the pink block hidden in the fingers, the SO-101 with 
 
 `cd workspace && uv run --with pytest pytest -q tests`: 35 passed.
 
-The full simulator suite (`uv run --with pytest pytest -q`), run once the afternoon's changes were in, with
-both real daemons running beside it: 56 passed and 1 failed in 10 min 43 s, stopping at the failure.
-The failure is `tests/test_push_t.py::test_the_t_is_pushed_onto_its_target[start0-target0]`: the push ended
-2.5 mm and 4 degrees from its target and the test's overlap measure came to 0.732 where it asks for more than
-0.75. Whether the wrist camera, now a body part in the kinematics, changed that run was not looked into.
+The full simulator suite (`uv run --with pytest pytest -q`) ran after the afternoon's changes were in. Both
+real daemons ran beside it. The result was 56 passed and 1 failed in 10 min 43 s. The suite stopped at the
+failure.
+The failure is `tests/test_push_t.py::test_the_t_is_pushed_onto_its_target[start0-target0]`. The push ended
+2.5 mm and 4 degrees from its target. The test's overlap measure was 0.732, and the test asks for more than
+0.75. The wrist camera is now a body part in the kinematics. Whether the wrist camera changed that run was not
+looked into.
 
-The files after it in the order (`test_robot_sim`, `test_second_arm`, `test_workspace`) and `test_kinematics`
-were then run by themselves: 29 passed in 4 min 20 s. `test_vision_live`: 1 passed. So every test passes
-except that one push.
+Then these files ran by themselves: the files after the failure in the order (`test_robot_sim`,
+`test_second_arm`, `test_workspace`) and `test_kinematics`. The result was 29 passed in 4 min 20 s.
+`test_vision_live`: 1 passed. Thus every test passes except that one push.
