@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mike</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --mist:#EDF0F2; --ink:#1B1F2A; --soft:#7C8594;
+  --mike:#FF7A6B;   /* the colour of his gripper */
+  --cube:#2F6BFF;   /* the colour of the cube he keeps throwing */
+  --bad:#D8433B;
+  --ease:cubic-bezier(.2,.9,.3,1.25);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:var(--mist);color:var(--ink);font:400 20px/1.4 "Bricolage Grotesque",ui-rounded,system-ui,sans-serif;-webkit-font-smoothing:antialiased;
+  display:grid;place-items:center;user-select:none;-webkit-user-select:none;cursor:pointer;transition:background .6s}
+body[data-s=listening]{background:#E3EAFB}
+body[data-s=oops]{background:#F3E9E8}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--cube);outline-offset:4px;border-radius:99px}
+
+/* ------------------------------------------------ Mike: the whole screen is his face */
+.mike{--tilt:0deg;--sx:1;--sy:1;--dy:0%;position:relative;width:min(48vmin,380px);aspect-ratio:1;translate:0 -4vh}
+.rig{position:absolute;inset:0;transform-origin:50% 85%;transform:translateY(var(--dy)) rotate(var(--tilt)) scale(var(--sx),var(--sy));will-change:transform}
+.body{position:absolute;inset:0;background:var(--mike);border-radius:46% 54% 52% 48%/52% 46% 54% 48%;
+  transition:background .5s,border-radius .7s var(--ease);animation:breathe 4.4s ease-in-out infinite;box-shadow:inset 0 -7% 0 #0000000d}
+.shadow{position:absolute;left:18%;right:18%;bottom:-13%;height:6%;border-radius:50%;background:#1B1F2A14;scale:calc(2 - var(--sy)) 1;transition:opacity .4s}
+.face{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.face .ink{fill:var(--ink);stroke:var(--ink)}
+.face .pen{fill:none;stroke:var(--ink);stroke-width:5;stroke-linecap:round;stroke-linejoin:round}
+@keyframes breathe{50%{border-radius:52% 48% 46% 54%/48% 54% 46% 52%}}
+[data-s=listening] .body{background:var(--cube);border-radius:50%}
+[data-s=listening] .face .ink{fill:#fff;stroke:#fff}[data-s=listening] .face .pen{stroke:#fff}
+[data-s=oops] .body{background:#EE8E84;border-radius:50% 50% 46% 54%/44% 44% 56% 56%}
+[data-s=asleep] .body{background:#C9CFD6}
+.extra{opacity:0;transition:opacity .35s}
+body[data-s=happy] .sparkle,body[data-s=oops] .sweat,body[data-s=asleep] .zzz,body[data-s=thinking] .dots{opacity:1}
+.sparkle{animation:twinkle .7s ease-in-out infinite alternate;transform-origin:center;transform-box:fill-box}
+.sparkle:nth-of-type(2){animation-delay:.25s}.sparkle:nth-of-type(3){animation-delay:.45s}
+@keyframes twinkle{from{scale:.5;rotate:-15deg}to{scale:1.15;rotate:15deg}}
+body[data-s=oops] .sweat{animation:drip 1.1s ease-in infinite}
+@keyframes drip{from{translate:0 -4px}to{translate:0 14px}}
+.zzz text{animation:float 2.6s ease-in-out infinite;font:600 22px "Bricolage Grotesque",sans-serif;fill:#8B95A3}
+.zzz text:nth-child(2){animation-delay:.6s}.zzz text:nth-child(3){animation-delay:1.2s}
+@keyframes float{from{translate:0 6px;opacity:0}40%{opacity:1}to{translate:8px -14px;opacity:0}}
+.dots circle{animation:dot 1s ease-in-out infinite;fill:var(--ink)}
+.dots circle:nth-child(2){animation-delay:.15s}.dots circle:nth-child(3){animation-delay:.3s}
+@keyframes dot{0%,100%{translate:0 0;opacity:.35}50%{translate:0 -6px;opacity:1}}
+
+/* ------------------------------------------------ the little there is besides him */
+.line{position:fixed;left:50%;bottom:19vh;translate:-50% 0;width:min(86vw,680px);text-align:center;color:var(--ink);min-height:2.8em;
+  opacity:0;transition:opacity .5s;text-wrap:balance;pointer-events:none}
+.line.show{opacity:1}
+.line.you{color:var(--cube)}
+.dock{position:fixed;bottom:5vh;left:50%;translate:-50% 0;display:flex;gap:14px;align-items:center}
+.dock button{height:52px;border-radius:99px;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:10px;padding:0 20px;font-size:16px;
+  background:#fff;transition:scale .18s var(--ease),background .25s,color .25s}
+.dock button:active{scale:.93}
+.dock svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+#mic.on{background:var(--cube);color:#fff}
+#stop{width:52px;padding:0;justify-content:center;color:var(--bad)}
+#stop:hover{background:var(--bad);color:#fff}
+.hint{position:fixed;top:5vh;left:50%;translate:-50% 0;color:var(--soft);font-size:16px;transition:opacity .6s;white-space:nowrap}
+.hint.gone{opacity:0}
+kbd{font:inherit;font-weight:600;color:var(--ink);background:#fff;border-radius:8px;padding:1px 9px;box-shadow:0 2px 0 #DCE1E6}
+
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body data-s="idle">
+<p class="hint" id="hint">Hold <kbd>space</kbd> or press and hold anywhere, and talk to Mike</p>
+
+<div class="mike" id="mike" role="img" aria-label="Mike">
+  <div class="shadow"></div>
+  <div class="rig">
+    <div class="body"></div>
+    <svg class="face" viewBox="-100 -100 200 200" aria-hidden="true">
+      <defs><clipPath id="lips"><path id="lipsPath"/></clipPath></defs>
+      <ellipse id="cheekL" cx="-52" cy="18" rx="15" ry="9" fill="#FF3F68"/><ellipse id="cheekR" cx="52" cy="18" rx="15" ry="9" fill="#FF3F68"/>
+      <path id="browL" class="pen"/><path id="browR" class="pen"/>
+      <g id="eyeL"><ellipse class="ink" rx="10"/><circle r="3.6" fill="#fff" cx="-3" cy="-5"/><circle r="1.6" fill="#fff" cx="3.5" cy="3"/><path class="pen"/></g>
+      <g id="eyeR"><ellipse class="ink" rx="10"/><circle r="3.6" fill="#fff" cx="-3" cy="-5"/><circle r="1.6" fill="#fff" cx="3.5" cy="3"/><path class="pen"/></g>
+      <path id="mouthFill" class="ink" stroke-width="5" stroke-linejoin="round"/>
+      <ellipse id="tongue" rx="11" ry="9" fill="#FF5C7A" clip-path="url(#lips)"/>
+      <path id="mouthLine" class="pen"/>
+      <ellipse id="tongueOut" rx="5.5" ry="7" fill="#FF5C7A" stroke="#1B1F2A" stroke-width="2.5"/>
+      <g class="extra sparkle"><path d="M-78-62l4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="#fff"/></g>
+      <g class="extra sparkle"><path d="M80-48l3 8 8 3-8 3-3 8-3-8-8-3 8-3z" fill="#fff"/></g>
+      <g class="extra sparkle"><path d="M64 58l2.5 6 6 2.5-6 2.5-2.5 6-2.5-6-6-2.5 6-2.5z" fill="#fff"/></g>
+      <path class="extra sweat" d="M66-44c5 8 8 12 8 17a8 8 0 0 1-16 0c0-5 3-9 8-17z" fill="#8FD3FF"/>
+      <g class="extra zzz"><text x="56" y="-58">z</text><text x="70" y="-74">z</text><text x="84" y="-92">z</text></g>
+      <g class="extra dots"><circle cx="58" cy="-78" r="4"/><circle cx="72" cy="-84" r="5"/><circle cx="88" cy="-92" r="6"/></g>
+    </svg>
+  </div>
+</div>
+
+<p class="line" id="line" aria-live="polite"></p>
+
+<div class="dock">
+  <button id="mic" title="Keeps listening; he only reacts when you say his name">
+    <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span id="micLabel">Hands-free</span>
+  </button>
+  <button id="stop" title="Stop the arm now" aria-label="Stop the arm"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg></button>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const mike = $('mike');
+
+/* ---- his face: one mood at a time. A passing mood (happy, oops) holds for a moment, then he settles. */
+let running = false, acting = false, hearing = false, online = false, mood = null, moodTimer = 0;
+function face() {
+  const s = !online ? 'asleep' : hearing ? 'listening' : playing ? 'speaking' : acting ? 'acting' : running ? 'thinking' : mood || 'idle';
+  document.body.dataset.s = s;
+}
+function feel(m, ms = 2600) { mood = m; clearTimeout(moodTimer); moodTimer = setTimeout(() => { mood = null; face(); }, ms); if (m === 'happy') hop = 1; face(); }
+
+/* Every feature of the face is a number that glides towards the pose for the current mood, so he never
+   snaps between expressions. `open` is how wide the eyes are, `arc` turns them into happy (+1) or sleepy
+   (-1) curves, `brow` tilts the eyebrows (+ worried, - stern), `lift` raises them, `smile` bends the mouth,
+   `wide` stretches it, `o` rounds it, `gape` opens it, `tongue` pokes it out. */
+const POSES = {
+  idle:      {open: 1,    arc: 0,  brow: 0,   lift: 0,   smile: .55, wide: 1,   o: 0,  gape: 0,   blush: .28, tongue: 0, tilt: 0,  lookX: 0,  lookY: 0},
+  listening: {open: 1.28, arc: 0,  brow: .25, lift: 1,   smile: .1,  wide: .55, o: 1,  gape: .22, blush: .2,  tongue: 0, tilt: 7,  lookX: 0,  lookY: -.1},
+  thinking:  {open: .85,  arc: 0,  brow: -.2, lift: .7,  smile: -.1, wide: .5,  o: .6, gape: .05, blush: .15, tongue: 0, tilt: -9, lookX: .9, lookY: -.9},
+  speaking:  {open: 1.05, arc: 0,  brow: .1,  lift: .35, smile: .6,  wide: 1,   o: 0,  gape: 0,   blush: .35, tongue: 0, tilt: 0,  lookX: 0,  lookY: 0},
+  acting:    {open: .55,  arc: 0,  brow: -.9, lift: -.5, smile: .15, wide: .7,  o: 0,  gape: 0,   blush: .2,  tongue: 1, tilt: 0,  lookX: 0,  lookY: .7},
+  happy:     {open: 1,    arc: 1,  brow: .2,  lift: 1,   smile: 1,   wide: 1.25, o: 0, gape: .7,  blush: .85, tongue: 0, tilt: 0,  lookX: 0,  lookY: 0},
+  oops:      {open: 1.1,  arc: 0,  brow: 1,   lift: .2,  smile: -.8, wide: .75, o: 0,  gape: .12, blush: 0,   tongue: 0, tilt: -5, lookX: 0,  lookY: .6},
+  asleep:    {open: 1,    arc: -1, brow: 0,   lift: -.3, smile: 0,   wide: .35, o: 1,  gape: .18, blush: .1,  tongue: 0, tilt: 10, lookX: 0,  lookY: 0},
+};
+const cur = {...POSES.idle};
+let voice = 0, mic = 0, hop = 0, hopV = 0, blink = 0, nextBlink = 1500, gaze = [0, 0], gazeTo = [0, 0], nextGaze = 0, pointer = null, tLast = performance.now();
+const level = (v) => { mic = Math.min(1, v * 9); };
+const el = (id) => document.getElementById(id);
+const eyes = [el('eyeL'), el('eyeR')].map((g) => ({g, ball: g.children[0], hi: [g.children[1], g.children[2]], arc: g.children[3]}));
+
+function draw(now) {
+  const dt = Math.min(.05, (now - tLast) / 1000); tLast = now;
+  const s = document.body.dataset.s, to = POSES[s] || POSES.idle, k = 1 - Math.exp(-dt * 11);
+  for (const key in cur) cur[key] += (to[key] - cur[key]) * k;
+
+  // blinking and little glances around, so he looks alive when nothing is happening
+  nextBlink -= dt * 1000; if (nextBlink < 0) { blink = 1; nextBlink = 1800 + Math.random() * 3800; if (Math.random() < .25) nextBlink = 220; }
+  blink = Math.max(0, blink - dt * 7.5);
+  if (now > nextGaze) { gazeTo = s === 'idle' || s === 'speaking' ? [(Math.random() - .5) * 1.4, (Math.random() - .5) * .8] : [0, 0]; nextGaze = now + 900 + Math.random() * 2400; }
+  const want = pointer && s !== 'thinking' && s !== 'acting' ? pointer : gazeTo;
+  gaze[0] += (want[0] - gaze[0]) * k * .6; gaze[1] += (want[1] - gaze[1]) * k * .6;
+  const lx = (cur.lookX + gaze[0]) * 6, ly = (cur.lookY + gaze[1]) * 5;
+
+  // a little spring for hops; talking and listening squash and stretch him with the sound
+  hopV += (-hop * 190 - hopV * 9) * dt; hop += hopV * dt;
+  const t = now / 1000, amp = s === 'speaking' ? voice : s === 'listening' ? mic : 0;
+  const sway = s === 'acting' ? Math.sin(t * 2.6) * 7 : s === 'thinking' ? Math.sin(t * 3.2) * 2.5 : s === 'speaking' ? Math.sin(t * 5) * 2.2 : Math.sin(t * 1.1) * 1.2;
+  const sy = 1 + amp * .07 + hop * .1 + (s === 'listening' ? mic * .1 : 0) + Math.sin(t * 1.45) * .012;
+  mike.style.setProperty('--tilt', (cur.tilt + sway).toFixed(2) + 'deg');
+  mike.style.setProperty('--sy', sy.toFixed(3)); mike.style.setProperty('--sx', (2 - sy + (s === 'listening' ? mic * .16 : 0)).toFixed(3));
+  mike.style.setProperty('--dy', (-Math.max(0, hop) * 16 - amp * 1.5).toFixed(2) + '%');
+
+  // eyes: round with a shine, squeezing shut to blink, or curved lines when beaming or asleep
+  const lid = Math.max(.06, cur.open * (1 - blink)), arcOn = Math.abs(cur.arc) > .5;
+  eyes.forEach((e, i) => {
+    const x = (i ? 34 : -34) + lx, y = -14 + ly - cur.lift * 1.5;
+    e.g.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+    e.ball.setAttribute('ry', (14 * lid).toFixed(1)); e.ball.style.display = arcOn ? 'none' : '';
+    e.hi.forEach((h) => h.style.display = arcOn || lid < .5 ? 'none' : '');
+    e.arc.style.display = arcOn ? '' : 'none';
+    if (arcOn) e.arc.setAttribute('d', `M-11 ${cur.arc > 0 ? 4 : -2} Q0 ${cur.arc > 0 ? -12 : 8} 11 ${cur.arc > 0 ? 4 : -2}`);
+  });
+  // eyebrows: tilt inwards-up when worried, inwards-down when concentrating
+  [el('browL'), el('browR')].forEach((b, i) => {
+    const sgn = i ? 1 : -1, x = sgn * 34 + lx * .5, y = -40 - cur.lift * 7 + ly * .4, a = cur.brow * 9 * sgn;
+    b.setAttribute('d', `M${(x - 11).toFixed(1)} ${(y + a).toFixed(1)} Q${x.toFixed(1)} ${(y - 3).toFixed(1)} ${(x + 11).toFixed(1)} ${(y - a).toFixed(1)}`);
+  });
+  el('cheekL').style.opacity = el('cheekR').style.opacity = cur.blush.toFixed(2);
+
+  // mouth: a curve when shut; when it opens, an upper lip and a lower lip with his tongue inside
+  const gape = Math.min(1, cur.gape + (s === 'speaking' ? voice * 1.05 : 0)), talkWide = s === 'speaking' ? 1 - voice * .28 : 1;
+  const w = 21 * cur.wide * talkWide * (1 - cur.o * .45), bend = cur.smile * 13, mx = lx * .7 + (s === 'thinking' ? 9 : 0), my = 30 + ly * .5;
+  const lower = bend + gape * 30 + cur.o * gape * 8, upper = bend * (1 - gape * .7) - cur.o * gape * 9;
+  const shape = `M${(mx - w).toFixed(1)} ${my} Q${mx.toFixed(1)} ${(my + upper).toFixed(1)} ${(mx + w).toFixed(1)} ${my} Q${mx.toFixed(1)} ${(my + lower * 1.9).toFixed(1)} ${(mx - w).toFixed(1)} ${my}Z`;
+  const openNow = gape > .06;
+  el('mouthFill').style.display = el('tongue').style.display = openNow ? '' : 'none'; el('mouthLine').style.display = openNow ? 'none' : '';
+  if (openNow) { el('mouthFill').setAttribute('d', shape); el('lipsPath').setAttribute('d', shape); el('tongue').setAttribute('cx', mx.toFixed(1)); el('tongue').setAttribute('cy', (my + lower * .95 + 5).toFixed(1)); }
+  else el('mouthLine').setAttribute('d', `M${(mx - w).toFixed(1)} ${my} Q${mx.toFixed(1)} ${(my + bend * 1.9).toFixed(1)} ${(mx + w).toFixed(1)} ${my}`);
+  const out = el('tongueOut'); out.style.opacity = Math.max(0, cur.tongue - .2).toFixed(2);
+  out.setAttribute('cx', (mx + w * .55).toFixed(1)); out.setAttribute('cy', (my + bend * .9 + 5).toFixed(1));
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+/* ---- the one line of words on screen: what he just said, or what he heard from you */
+let lineTimer = 0;
+function say(text, you = false, ms = 6000) {
+  const el = $('line'); el.textContent = text; el.classList.toggle('you', you); el.classList.add('show');
+  clearTimeout(lineTimer); lineTimer = setTimeout(() => el.classList.remove('show'), ms);
+  $('hint').classList.add('gone');
+}
+
+/* ---- speech out: clips made on the server, played one after another; his mouth follows the sound */
+const queue = []; let playing = false, lastSpoke = 0, current = null, out = null, outAn = null;
+function playNext() {
+  if (playing || !queue.length) return;
+  const item = queue.shift();
+  playing = true; face(); say(item.text, false, 60000);
+  const a = current = new Audio(item.url); a.crossOrigin = 'anonymous';
+  // His mouth follows the real sound when the browser lets us listen to it. Before the first key press or
+  // click the browser keeps that audio path asleep, and routing the clip through it would mute him, so
+  // then the clip plays the plain way and the mouth just chatters in rhythm.
+  let wired = false;
+  try {
+    out = out || new AudioContext(); if (out.state === 'suspended') out.resume();
+    if (out.state === 'running') {
+      outAn = out.createAnalyser(); outAn.fftSize = 256; out.createMediaElementSource(a).connect(outAn); outAn.connect(out.destination);
+      wired = true;
+    }
+  } catch (e) { wired = false; }
+  const buf = new Uint8Array(256), t0 = performance.now();
+  (function lips() {
+    if (current !== a) { voice = 0; return; }
+    let open;
+    if (wired) { outAn.getByteTimeDomainData(buf); let e = 0; for (const v of buf) e += (v - 128) * (v - 128); open = Math.min(1, Math.sqrt(e / buf.length) / 36); }
+    else { const t = (performance.now() - t0) / 1000; open = a.paused ? 0 : 0.25 + 0.55 * Math.abs(Math.sin(t * 9.5) * Math.sin(t * 3.1 + 1)); }
+    voice += (open - voice) * (open > voice ? .7 : .35); requestAnimationFrame(lips);  // snaps open, eases shut
+  })();
+  a.onended = a.onerror = () => { playing = false; current = null; lastSpoke = performance.now(); say(item.text, false, 2500); face(); playNext(); };
+  a.play().catch(() => { playing = false; current = null; face(); });
+}
+function shutUp() {  // you started talking over him: stop mid-word and drop what was queued
+  queue.length = 0; if (current) { current.pause(); current = null; } playing = false; lastSpoke = 0; face();
+}
+function speak(text, url) { if (url) { queue.push({text, url}); playNext(); } else say(text); }
+
+/* ---- speech in: cut into utterances here, transcribed on the server */
+async function sendUtterance(blob, needName = true) {
+  if (blob.size < 3000) return;
+  const r = await (await fetch('/api/autopilot/voice', {method:'POST', headers:{'content-type': blob.type || 'audio/webm', 'x-need-name': needName ? '1' : '0'}, body: blob})).json();
+  if (!r.ok && r.error) { say(r.error); feel('oops'); }
+  else if (!needName && !r.text) { say('Didn’t catch that.'); feel('oops', 1600); }
+}
+
+// hands-free: always listening, but the server only acts on speech that says his name
+let listening = false, stream = null, ctx = null, rec = null, chunks = [], talking = false, quietSince = 0, startedAt = 0, bargeAt = 0;
+function startRec() { chunks = []; rec = new MediaRecorder(stream); rec.ondataavailable = (e) => chunks.push(e.data); rec.onstop = () => sendUtterance(new Blob(chunks, {type: rec.mimeType})); rec.start(); }
+$('mic').onclick = async (ev) => {
+  ev.stopPropagation();
+  listening = !listening; $('mic').classList.toggle('on', listening); $('micLabel').textContent = listening ? 'Say “Mike…”' : 'Hands-free';
+  if (!listening) { stream && stream.getTracks().forEach((t) => t.stop()); ctx && ctx.close(); stream = ctx = null; hearing = false; level(0); face(); return; }
+  try { stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}}); }
+  catch (e) { listening = false; $('mic').classList.remove('on'); $('micLabel').textContent = 'Hands-free'; say('The microphone is blocked. Allow it in the browser and try again.'); return; }
+  ctx = new AudioContext(); const an = ctx.createAnalyser(); an.fftSize = 1024; ctx.createMediaStreamSource(stream).connect(an);
+  const buf = new Float32Array(an.fftSize); let floor = 0.01;
+  const tick = () => {
+    if (!listening) return;
+    an.getFloatTimeDomainData(buf); let e = 0; for (const v of buf) e += v * v; const rms = Math.sqrt(e / buf.length);
+    const now = performance.now(), mine = playing || now - lastSpoke < 250;
+    if (!talking && !mine) floor = 0.95 * floor + 0.05 * rms;
+    // While he is speaking the echo canceller removes most of his voice; what is left is quiet, so only
+    // clearly louder sound counts, and it has to last before it cuts him off.
+    const loud = rms > Math.max(mine ? 0.05 : 0.018, floor * (mine ? 6 : 3));
+    if (loud && !talking) { talking = true; startedAt = now; bargeAt = mine ? now : 0; startRec(); }
+    if (talking) {
+      if (loud) quietSince = 0; else if (!quietSince) quietSince = now;
+      if (bargeAt && loud && now - bargeAt > 220) { shutUp(); bargeAt = 0; fetch('/api/autopilot/hush', {method: 'POST'}); }
+      const gaveUp = bargeAt && quietSince && now - quietSince > 200;  // a blip while he was talking, not speech
+      if (gaveUp || (quietSince && now - quietSince > 650) || now - startedAt > 12000) {
+        talking = false; quietSince = 0;
+        if (gaveUp || now - startedAt < 350) { rec.onstop = null; rec.stop(); } else rec.stop();
+        bargeAt = 0;
+      }
+    }
+    if (!pttDown) { hearing = talking && !mine; level(hearing ? rms : 0); face(); }
+    requestAnimationFrame(tick);
+  };
+  tick();
+};
+
+// hold to talk: the space bar, or press and hold anywhere on the screen
+let pttStream = null, pttRec = null, pttChunks = [], pttDown = false, pttAn = null;
+async function pttStart() {
+  if (pttDown) return; pttDown = true; shutUp(); fetch('/api/autopilot/hush', {method: 'POST'});
+  try { pttStream = pttStream || await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}}); }
+  catch (e) { pttDown = false; say('The microphone is blocked. Allow it in the browser and try again.'); return; }
+  if (!pttDown) return;
+  if (!pttAn) { const c = new AudioContext(); pttAn = c.createAnalyser(); pttAn.fftSize = 512; c.createMediaStreamSource(pttStream).connect(pttAn); }
+  pttChunks = []; pttRec = new MediaRecorder(pttStream); pttRec.ondataavailable = (e) => pttChunks.push(e.data);
+  pttRec.onstop = () => sendUtterance(new Blob(pttChunks, {type: pttRec.mimeType}), false);
+  pttRec.start(); hearing = true; face(); $('hint').classList.add('gone'); $('line').classList.remove('show');
+  const buf = new Float32Array(pttAn.fftSize);
+  (function meter() { if (!pttDown) return; pttAn.getFloatTimeDomainData(buf); let e = 0; for (const v of buf) e += v * v; level(Math.sqrt(e / buf.length)); requestAnimationFrame(meter); })();
+}
+function pttStop() {
+  if (!pttDown) return; pttDown = false; hearing = false; level(0); face();
+  if (pttRec && pttRec.state === 'recording') setTimeout(() => pttRec.state === 'recording' && pttRec.stop(), 150);
+}
+document.body.addEventListener('pointerdown', (e) => { if (!e.target.closest('.dock')) { e.preventDefault(); pttStart(); } });
+window.addEventListener('pointerup', pttStop);
+window.addEventListener('pointercancel', pttStop);
+window.addEventListener('keydown', (e) => { if (e.code === 'Space' && !e.repeat) { e.preventDefault(); pttStart(); } if (e.code === 'Escape') $('stop').click(); });
+window.addEventListener('keyup', (e) => { if (e.code === 'Space') { e.preventDefault(); pttStop(); } });
+$('stop').onclick = (ev) => { ev.stopPropagation(); shutUp(); fetch('/api/autopilot/stop', {method:'POST'}); say('Stopped.'); };
+
+// his eyes follow the pointer, so he seems to look at whoever is at the screen
+window.addEventListener('pointermove', (e) => { pointer = [(e.clientX / innerWidth - .5) * 2.2, (e.clientY / innerHeight - .5) * 1.6]; });
+document.addEventListener('pointerleave', () => { pointer = null; });
+
+/* ---- what the daemon tells us */
+let lastOk = true;
+function connect() {
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.onopen = () => { online = true; face(); };
+  ws.onmessage = (m) => {
+    const d = JSON.parse(m.data);
+    if (d.type !== 'event') return;
+    if (d.kind === 'autopilot') {
+      if (d.phase === 'start') { shutUp(); running = true; acting = false; lastOk = true; say(d.prompt, true, 4000); face(); }
+      if (d.phase === 'decision' && (d.skill !== 'none' || d.waypoints.length)) { acting = true; face(); }
+      if (d.phase === 'speech') speak(d.text, d.url);
+      if (d.phase === 'queued') say('Next: ' + d.text, true, 3000);
+      if (d.phase === 'end') {
+        running = acting = false;
+        if (d.status === 'done' && lastOk) feel('happy', 2200); else if (d.status === 'stuck' || d.status === 'error') feel('oops', 3200);
+        face();
+      }
+    } else if (d.kind === 'tool_end' && d.source === 'autopilot') {
+      acting = false; lastOk = d.ok; if (!d.ok) feel('oops', 1800); face();
+    }
+  };
+  ws.onclose = () => { online = false; face(); setTimeout(connect, 1000); };
+}
+connect(); face();
+</script>
+</body>
+</html>

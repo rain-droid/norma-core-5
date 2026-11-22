@@ -8,6 +8,7 @@ runs, and execution aborts if the arm is blocked or servo state goes stale.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import time
@@ -28,7 +29,8 @@ from .kinematics import (
 )
 from .link import Link
 from .motion import Trajectory, interpolate_joint
-from .servo import ALL_IDS, ARM_IDS, GRIPPER_ID, REG_TORQUE_LIMIT, JointRange
+from .profile import ACTIVE as PROFILE
+from .servo import ALL_IDS, ARM_IDS, GRIPPER_ID, REG_TORQUE_LIMIT, TICK_RAD, JointRange
 
 log = logging.getLogger("elrobot.robot")
 
@@ -100,13 +102,14 @@ class Robot:
         self.kin = Kinematics(cfg.urdf)
         self._urdf_lower = self.kin.lower.copy()
         self._urdf_upper = self.kin.upper.copy()
+        self._cal = PROFILE.load_calibration()
         self._ranges: dict[int, JointRange] = {}
         self._ranges_key: tuple | None = None
 
         self._motion = asyncio.Lock()
         self._stop_evt = asyncio.Event()
         self._cmd_q: np.ndarray | None = None  # last desired arm angles
-        self._bias = np.zeros(7)  # added to the desired angles to cancel servo droop
+        self._bias = np.zeros(len(ARM_IDS))  # added to the desired angles to cancel servo droop
         self._grip_goal: float | None = None
         self.holding = False
         self.activity = "idle"
@@ -126,6 +129,13 @@ class Robot:
                     lo, hi = self.kin.gripper_lower, self.kin.gripper_upper
                 else:
                     lo, hi = float(self._urdf_lower[i - 1]), float(self._urdf_upper[i - 1])
+                c = self._cal.get(i) if self._cal else None
+                if c is not None:
+                    # Fixed calibration: angle = direction * (tick - center) at the true servo scale.
+                    d = float(c["direction"])
+                    ends = sorted(d * (c[k] - c["center_tick"]) * TICK_RAD for k in ("range_min", "range_max"))
+                    ranges[i] = JointRange(lower=ends[0], upper=ends[1], range_min=int(c["range_min"]), range_max=int(c["range_max"]), sign=d)
+                    continue
                 ranges[i] = JointRange(lower=lo, upper=hi, range_min=m.range_min, range_max=m.range_max)
             self._ranges, self._ranges_key = ranges, key
             if all(i in ranges and ranges[i].valid for i in ARM_IDS):
@@ -146,6 +156,13 @@ class Robot:
         if bad:
             return f"joint(s) {bad} are not calibrated; run scripts/calibrate.py --manual"
         return None
+
+    def offsets_wrong(self) -> dict[int, tuple[int, int]]:
+        """Servos whose stored position offset differs from the calibration file: {id: (have, want)}."""
+        if not self._cal or self.link.mode == "sim":
+            return {}
+        m = self.link.motors
+        return {i: (m[i].offset, int(c["homing_offset"])) for i, c in self._cal.items() if i in m and m[i].offset != int(c["homing_offset"])}
 
     def q(self) -> np.ndarray:
         """Measured arm joint angles (rad)."""
@@ -317,11 +334,20 @@ class Robot:
         for k in range(1, n):
             p = p0 + (pos - p0) * (k / (n - 1))
             r = self.kin.ik(p, approach=a, q_seed=path[-1], limit_margin=self.cfg.limit_margin,
-                            random_seeds=0, ref_weight=0.05, pos_tol=0.002, ang_tol=math.radians(4))  # fmt: skip
+                            random_seeds=0, ref_weight=0.05, pos_tol=0.002, ang_tol=math.radians(max(4.0, PROFILE.ik_ang_tol_deg)))  # fmt: skip
             if not r.ok:
                 raise RobotError(f"can't move in a straight line to there: stuck {100 * k / (n - 1):.0f}% of the way ({r.describe()})")
             if np.max(np.abs(r.q - path[-1])) > 0.35:
-                raise RobotError("can't move in a straight line to there: the arm would have to flip configuration")
+                # With the jaws free to turn about the approach, the solver sometimes lands on a far-off
+                # wrist roll that is just as valid. Ask again, pulled hard towards the previous step.
+                for w in (0.5, 2.0):
+                    r2 = self.kin.ik(p, approach=a, q_seed=path[-1], limit_margin=self.cfg.limit_margin,
+                                     random_seeds=0, ref_weight=w, pos_tol=0.003, ang_tol=math.radians(max(4.0, PROFILE.ik_ang_tol_deg)))  # fmt: skip
+                    if r2.ok and np.max(np.abs(r2.q - path[-1])) <= 0.35:
+                        r = r2
+                        break
+                else:
+                    raise RobotError("can't move in a straight line to there: the arm would have to flip configuration")
             path.append(r.q)
         why = self.check_path(path, allow_low=allow_low)
         if why:
@@ -404,6 +430,7 @@ class Robot:
         t0 = time.monotonic()
         lag_since: float | None = None
         tick_n = 0
+        kicked = False
         while True:
             now = time.monotonic()
             t = now - t0
@@ -426,11 +453,50 @@ class Robot:
                 if hit:
                     await self._hold_here()
                     return MoveResult("contact", hit)
-            worst = float(np.max(np.abs(lag)))
+            # A soft servo trails a moving command by roughly its speed times a fixed delay, so
+            # only lag beyond that counts as being blocked.
+            vel = np.abs(traj.sample(min(t + dt, traj.duration)) - traj.sample(max(t - dt, 0.0))) / (2 * dt)
+            excess = np.abs(lag) - cfg.stall_lag_time * vel
+            worst = float(np.max(excess))
             if worst > cfg.stall_error:
                 lag_since = lag_since or now
+                if now - lag_since > cfg.stall_time and not kicked:
+                    # A servo sometimes stops taking goal writes for a moment while still reporting
+                    # state. Hold the trajectory where it is and keep writing until every servo has
+                    # taken the goal again; only if that never happens is the arm really blocked.
+                    want = self._arm_ticks(q_cmd + self._bias)
+                    deaf = [i for i in ARM_IDS if abs(link.motors[i].goal_tick - want[i]) > 30]
+                    if deaf:
+                        kicked = True
+                        t_deaf = time.monotonic()
+                        log.warning("servos %s ignored goal writes (goal %s, want %s): holding the path until they listen", deaf,
+                                    [link.motors[i].goal_tick for i in deaf], [want[i] for i in deaf])
+                        while time.monotonic() - t_deaf < 2.5:
+                            if self._stop_evt.is_set():
+                                await self._hold_here()
+                                raise Stopped("stopped")
+                            await link.set_torque(deaf, True)
+                            await link.write_acc({i: cfg.servo_acc for i in ARM_IDS})
+                            await link.write_goals(want)
+                            await asyncio.sleep(0.06)
+                            deaf = [i for i in ARM_IDS if abs(link.motors[i].goal_tick - want[i]) > 30]
+                            if not deaf:
+                                break
+                        waited = time.monotonic() - t_deaf
+                        log.warning("servos %s after %.2f s", "listening again" if not deaf else f"{deaf} still deaf", waited)
+                        t0 += waited  # the path did not advance while we waited
+                        lag_since = None
+                        await asyncio.sleep(0.25)  # let them catch up to where the path already is
+                        t0 += 0.25
+                        continue
                 if now - lag_since > cfg.stall_time:
-                    j = int(np.argmax(np.abs(lag))) + 1
+                    j = int(np.argmax(excess)) + 1
+                    log.warning("stall: label=%s t=%.2f/%.2f cmd=%s meas=%s bias=%s load=%s start=%s end=%s", self.activity, t, traj.duration,
+                                np.degrees(q_cmd).round(1), np.degrees(q_meas).round(1), np.degrees(self._bias).round(1),
+                                [link.motors[i].load for i in ARM_IDS], np.degrees(traj.sample(0)).round(1), np.degrees(traj.end).round(1))
+                    log.warning("stall servos: %s", [(i, "goal", link.motors[i].goal_tick, "tick", link.motors[i].tick, "tq", int(link.motors[i].torque), "st", link.motors[i].status,
+                                                      "spd", int.from_bytes(link.raw[i][0x2E:0x30], "little"), "acc", link.raw[i][0x29], "lim", int.from_bytes(link.raw[i][0x30:0x32], "little"),
+                                                      "want", self._arm_ticks(q_cmd + self._bias)[i]) for i in ARM_IDS])
                     await self._hold_here()
                     raise RobotError(f"blocked: joint {j} is {math.degrees(abs(lag[j - 1])):.0f} deg behind where it should be. Something is in the way or the load is too heavy.")
             else:
@@ -465,6 +531,12 @@ class Robot:
         return MoveResult("done", residual=residual)
 
     async def _begin(self, label: str) -> None:
+        # Planning (IK, image work) runs on the event loop and can starve the state reader for a
+        # moment: give it a chance to catch up before judging the connection.
+        for _ in range(60):
+            if self.link.state_age < 0.2:
+                break
+            await asyncio.sleep(0.02)
         why = self.why_not_ready()
         if why:
             raise RobotError(why)
@@ -524,7 +596,18 @@ class Robot:
             a = approach
             if a is None and pitch is not None:
                 a = approach_from_pitch(pos[:2], pitch)
-            path = self.plan_linear(q0, pos, approach=a, allow_low=allow_low)
+            try:
+                path = self.plan_linear(q0, pos, approach=a, allow_low=allow_low)
+            except RobotError:
+                # A 5-joint arm cannot always hold the approach direction along the whole line.
+                # For a short move, going joint-wise to the end pose stays close to the line.
+                if self.kin.n > 5 or np.linalg.norm(pos - self.kin.fk(q0)[:3, 3]) > 0.13:
+                    raise
+                end = self.kin.ik(pos, approach=a if a is not None else self.kin.fk(q0)[:3, 2], q_seed=q0, limit_margin=self.cfg.limit_margin,
+                                  accept=lambda q: self.check_config(q, allow_low=allow_low) is None)  # fmt: skip
+                if not end.ok or np.max(np.abs(end.q - q0)) > 1.0:
+                    raise
+                return await self.move_joints(end.q, speed=speed, label=label, allow_low=allow_low, guard=guard)
             target = {"pos": pos.tolist(), "approach": self.kin.fk(path[-1])[:3, 2].tolist()}
             return await self.move_path(path, speed=speed, label=label, guard=guard, target=target)
         if approach is None and pitch is None:
@@ -552,23 +635,114 @@ class Robot:
         path = self.plan_linear(q0, p, allow_low=allow_low)
         return await self.move_path(path, speed=speed, label=label, guard=guard)
 
+    # ================================================================== throwing
+
+    async def throw(self, q_end, *, release_at: float = 0.09, pan: float = 0.0, release: bool = True, timeout: float = 1.2) -> dict:
+        """Whip the arm from where it is to `q_end` at full servo speed and let go mid-swing.
+
+        The goal is written once and the servos race to it. The swing repeats to within a few
+        milliseconds, and a command takes about 0.2 s to reach a servo, so the jaws are told to
+        open a fixed `release_at` seconds after the swing is commanded rather than when the arm
+        is seen to be in the right place: by then it would be far too late. What actually
+        happened (when the jaws let go, how fast and at what angle) is measured and returned.
+        """
+        async with self._motion:
+            await self._begin("throwing")
+            link, kin = self.link, self.kin
+            fwd = np.array([math.sin(pan), math.cos(pan), 0.0])
+            q_end = kin.clamp(np.asarray(q_end, dtype=float))
+            samples: list[tuple] = []
+            out: dict = {"released": False}
+            try:
+                await link.write_acc({i: 0 for i in ALL_IDS})
+                await link.write_speed({i: 0 for i in ALL_IDS})
+                await asyncio.sleep(0.05)
+                grip0 = link.motors[GRIPPER_ID].tick
+                q_prev, stamp_prev, ns_prev = self.q(), link.state_stamp, 0
+                qd = np.zeros(len(ARM_IDS))
+                t0 = time.monotonic()
+                await link.write_goals(self._arm_ticks(q_end))
+                opened = braked = False
+                t_let_go: float | None = None
+                while time.monotonic() - t0 < timeout:
+                    await asyncio.sleep(0.002)
+                    if self._stop_evt.is_set():
+                        raise Stopped("stopped")
+                    if release and not opened and time.monotonic() - t0 >= release_at:
+                        await link.write_goals({GRIPPER_ID: self._gripper_tick(1.0)})
+                        opened = True
+                    if link.state_stamp == stamp_prev:
+                        continue
+                    q, stamp = self.q(), link.state_stamp
+                    # time between readings by the Station's own clock: arrival times here jitter
+                    ns = link.motors[ARM_IDS[1]].stamp_ns
+                    dt_s = (ns - ns_prev) * 1e-9 if ns_prev and ns > ns_prev else stamp - stamp_prev
+                    ns_prev = ns
+                    if dt_s < 0.004:
+                        stamp_prev = stamp
+                        continue
+                    qd = 0.4 * qd + 0.6 * (q - q_prev) / dt_s
+                    q_prev, stamp_prev = q, stamp
+                    v = kin.jacobian(q)[:3] @ qd
+                    vh, vz = float(v @ fwd), float(v[2])
+                    grip = link.motors[GRIPPER_ID].tick
+                    samples.append((round(stamp - t0, 3), np.degrees(q).round(1).tolist(), round(math.hypot(vh, vz), 2),
+                                    round(math.degrees(math.atan2(vz, vh))), grip))
+                    # ~45 ticks of jaw travel is enough to free what the jaws were squeezing
+                    if t_let_go is None and abs(grip - grip0) > 45:
+                        t_let_go = stamp - t0
+                        p = kin.fk(q)[:3, 3]
+                        out = {"released": True, "t": round(t_let_go, 3), "speed": round(math.hypot(vh, vz), 2),
+                               "elevation": round(math.degrees(math.atan2(vz, vh))), "from": p.round(3).tolist(), "v": [round(vh, 2), round(vz, 2)]}
+                    past = t_let_go is not None or (not release and stamp - t0 > release_at + 0.3)
+                    if past and not braked:
+                        braked = True  # follow through a little, then stop well short of the far goal
+                        await link.write_goals(self._arm_ticks(kin.clamp(q + qd * 0.16)))
+                    if braked and stamp - t0 > (t_let_go or release_at + 0.3) + 0.15 and float(np.max(np.abs(qd))) < 0.3:
+                        break
+                if release and not opened:
+                    await link.write_goals({GRIPPER_ID: self._gripper_tick(1.0)})
+                await asyncio.sleep(0.6)
+            finally:
+                self._bias[:] = 0.0
+                self._cmd_q = self.q()
+                await link.write_goals(self._arm_ticks(self._cmd_q))
+                await link.write_speed({**{i: self.cfg.servo_speed for i in ARM_IDS}, GRIPPER_ID: self.cfg.gripper_speed})
+                await link.write_acc({**{i: self.cfg.servo_acc for i in ARM_IDS}, GRIPPER_ID: 0})
+                if release:
+                    self.holding = False
+                    self._grip_goal = 1.0
+                self.activity = "idle"
+                self.last_throw = samples
+                try:
+                    (self.cfg.data_dir / "last_throw.json").write_text(json.dumps({"fired": out, "release_at": release_at, "samples": samples}))
+                except Exception:
+                    log.exception("could not save throw trace")
+            if out["released"]:
+                # where it comes back down to release height, ignoring drag
+                vh, vz = out["v"]
+                out["lands_m"] = round(float(out["from"][1]) + vh * 2 * max(vz, 0.0) / 9.81, 2)
+            log.info("throw: %s", out)
+            return out
+
     # ================================================================== gripper
 
     async def _gripper_wait(self, timeout: float = 2.5) -> float:
         """Wait for the jaws to stop moving; returns the achieved opening (0..1)."""
-        m = self.link.motors
+        # link.motors is replaced on every state update: always read through the link
+        tick_now = lambda: self.link.motors[GRIPPER_ID].tick  # noqa: E731
         t0 = time.monotonic()
-        last_tick = m[GRIPPER_ID].tick
+        last_tick = tick_now()
         still_since = None
-        await asyncio.sleep(0.12)
+        await asyncio.sleep(0.15)
         while time.monotonic() - t0 < timeout:
             if self._stop_evt.is_set():
                 raise Stopped("stopped")
-            await asyncio.sleep(0.04)
-            tick = m[GRIPPER_ID].tick
+            await asyncio.sleep(0.05)
+            tick = tick_now()
             if abs(tick - last_tick) <= 2:
                 still_since = still_since or time.monotonic()
-                if time.monotonic() - still_since > 0.2:
+                if time.monotonic() - still_since > 0.3:
                     break
             else:
                 still_since = None

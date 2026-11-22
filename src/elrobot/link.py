@@ -67,6 +67,7 @@ class Link:
         self.bus_serial: str | None = None
         self.frames: dict[str, Frame] = {}
         self.cameras: dict[str, CameraInfo] = {}
+        self.raw: dict[int, bytes] = {}  # last register dump per servo
         self.calibration = CalibrationProgress()
 
     # ---- state
@@ -181,6 +182,10 @@ class StationLink(Link):
                         quiet_since = quiet_since or time.monotonic()
                         if time.monotonic() - quiet_since > 3.0:
                             log.warning("no servo state for %.1fs, reconnecting to Station", self.state_age)
+                            # One reconnect per outage: with the stamp cleared this does not fire
+                            # again until servo state has been seen once more.
+                            self.state_stamp = 0.0
+                            self.motors = {}
                             break
                     else:
                         quiet_since = None
@@ -229,6 +234,7 @@ class StationLink(Link):
             motors = {}
             for m in bus.get_motors() or []:
                 dump = bytes(m.get_state())
+                self.raw[m.get_id()] = dump
                 motors[m.get_id()] = MotorState.from_dump(
                     m.get_id(),
                     dump,
@@ -236,6 +242,7 @@ class StationLink(Link):
                     range_max=m.get_range_max(),
                     range_frozen=m.get_range_freezed(),
                     has_error=len(dump) == 0,
+                    stamp_ns=int(m.get_monotonic_stamp_ns() or 0),
                 )
             self.motors = motors
             self.state_stamp = time.monotonic()
@@ -287,6 +294,9 @@ class StationLink(Link):
                 t.cancel()
 
     def _name_camera(self, unique_id: str) -> str:
+        for info in self.cameras.values():  # seen before this reconnect: keep its name
+            if unique_id and info.unique_id == unique_id:
+                return info.name
         for key, name in self._camera_names.items():
             if key and key in unique_id:
                 return name
@@ -340,7 +350,11 @@ class StationLink(Link):
         if self._client is None or not self._client.setup_done:
             raise ConnectionError("not connected to Station")
         drv = commands.DriverCommand(type=drivers.StationCommandType.STC_ST3215_COMMAND, body=st_cmd.encode())
+        t0 = time.monotonic()
         await asyncio.wait_for(send_commands(self._client, [drv]), timeout=1.0)
+        dt = time.monotonic() - t0
+        if dt > 0.08:
+            log.warning("slow command enqueue: %.0f ms", dt * 1000)
 
     async def sync_write(self, address: int, values: dict[int, bytes]) -> None:
         from .norma import st3215

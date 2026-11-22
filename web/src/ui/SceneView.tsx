@@ -3,7 +3,6 @@ import { app } from '../state/app.ts';
 import { useStore } from '../state/store.ts';
 import { RobotScene, type Insets } from '../scene/RobotScene.ts';
 
-const DEFAULT_URDF = '/assets/elrobot/elrobot_follower.urdf';
 const LAYERS = 12;
 
 type Load =
@@ -26,10 +25,12 @@ export function SceneView({ insets, onScene }: Props) {
   const [webglError, setWebglError] = useState<string | null>(null);
   const [load, setLoad] = useState<Load>({ phase: 'loading', loaded: 0, total: 0 });
   const [attempt, setAttempt] = useState(0);
-  const loadedRef = useRef(false);
+  /** URDF of the arm now on the mat (null until one is in). */
+  const loadedRef = useRef<string | null>(null);
   const [loaderGone, setLoaderGone] = useState(false);
 
   const urdf = useStore(app, (s) => s.meta?.urdf ?? null);
+  const reach = useStore(app, (s) => s.meta?.reach_m ?? null);
   const tableZ = useStore(app, (s) => s.meta?.table_z ?? 0);
   const plan = useStore(app, (s) => s.plan);
   const markers = useStore(app, (s) => s.markers);
@@ -51,26 +52,29 @@ export function SceneView({ insets, onScene }: Props) {
     return () => {
       onScene(null);
       sceneRef.current = null;
-      loadedRef.current = false;
+      loadedRef.current = null;
       created.dispose();
     };
     // The scene is created once for the lifetime of the page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load the arm once. The URDF path comes from `hello`, but the well-known
-  // default lets the model start loading before the socket is even open.
+  // Load the arm the daemon says it is driving. Which arm that is (and so
+  // which URDF, joint names and servo ids) is only known from `hello`, so
+  // nothing is drawn before it: a guessed model would move wrongly. A daemon
+  // that comes back as a different arm replaces the model.
   useEffect(() => {
-    if (!scene || loadedRef.current) return;
+    if (!scene || !urdf || loadedRef.current === urdf) return;
     let cancelled = false;
+    const meta = app.get().meta;
     setLoad({ phase: 'loading', loaded: 0, total: 0 });
     scene
-      .loadRobot(urdf ?? DEFAULT_URDF, (p) => {
+      .loadRobot(urdf, { name: meta?.robot, joints: meta?.joints ?? [] }, (p) => {
         if (!cancelled) setLoad({ phase: 'loading', loaded: p.loaded, total: p.total });
       })
       .then(() => {
         if (cancelled) return;
-        loadedRef.current = true;
+        loadedRef.current = urdf;
         setLoad({ phase: 'ready' });
       })
       .catch((err: unknown) => {
@@ -80,9 +84,7 @@ export function SceneView({ insets, onScene }: Props) {
     return () => {
       cancelled = true;
     };
-    // `urdf` is read when an attempt starts; a late `hello` must not restart a load in flight.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene, attempt]);
+  }, [scene, attempt, urdf]);
 
   // The model is served by the daemon: if it failed while the daemon was
   // down, try again as soon as the link comes up.
@@ -102,6 +104,7 @@ export function SceneView({ insets, onScene }: Props) {
   }, [load.phase]);
 
   useEffect(() => scene?.setTableZ(tableZ), [scene, tableZ]);
+  useEffect(() => scene?.setReach(reach), [scene, reach]);
   useEffect(() => scene?.setPlan(plan), [scene, plan]);
   useEffect(() => scene?.setMarkers(markers), [scene, markers]);
   useEffect(() => scene?.setInsets(insets), [scene, insets]);
@@ -126,7 +129,7 @@ export function SceneView({ insets, onScene }: Props) {
         <div className="loader loader--error" style={{ left: cx, top: cy }} role="alert">
           <div className="loader__title">the arm did not load</div>
           <div className="loader__sub">
-            {load.message} The model comes from the daemon at /assets/elrobot, so check that it is running.
+            {load.message} The model comes from the daemon, so check that it is running.
           </div>
           <button type="button" className="btn btn--robot" onClick={() => setAttempt((a) => a + 1)}>
             Load it again
@@ -145,7 +148,9 @@ export function SceneView({ insets, onScene }: Props) {
               ? `${load.loaded} of ${load.total} parts`
               : load.phase === 'ready'
                 ? 'done'
-                : 'fetching the model'}
+                : urdf
+                  ? 'fetching the model'
+                  : 'waiting for the daemon'}
           </div>
         </div>
       )}

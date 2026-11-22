@@ -22,9 +22,11 @@ from pathlib import Path
 import numpy as np
 from scipy.optimize import least_squares
 
-ARM_JOINT_NAMES = [f"rev_motor_{i:02d}" for i in range(1, 8)]
+from .profile import ACTIVE as PROFILE
+
+ARM_JOINT_NAMES = list(PROFILE.arm_joint_names)
 GRIPPER_JOINT_NAME = "rev_motor_08"
-TIP_LINK = "Gripper_Base_v1_1"
+TIP_LINK = PROFILE.tip_link
 
 # Measured from the jaw meshes (see docs/NOTES.md): in the Gripper_Base frame the finger pads
 # run from y=0.045 to y=0.1035, centred at x=0.0017, z=0. The TCP sits 12 mm back from the tips.
@@ -185,7 +187,7 @@ class Kinematics:
         # Tool frame in the Gripper_Base frame. Approach is the wrist-roll axis pointing out of the
         # gripper; the jaw axis comes from the prismatic jaw joints. Both are a degree or so off the
         # link's own axes, so take them from the URDF rather than assuming.
-        approach = -self.joints[-1].axis
+        approach = unit(self.tip_post[:3, :3].T @ -self.joints[-1].axis)
         jaw_joint = next(j for j in root.findall("joint") if j.get("name") == "rev_motor_08_1")
         jaw = -unit([float(v) for v in jaw_joint.find("axis").get("xyz").split()])
         jaw = unit(jaw - approach * float(jaw @ approach))
@@ -197,6 +199,19 @@ class Kinematics:
         self._tips_tool = np.array([[half, 0, TCP_BACKOFF], [-half, 0, TCP_BACKOFF]])
         # Extra body points (tool frame) included in clearance checks, e.g. the wrist camera.
         self.extra_points_tool = np.zeros((0, 3))
+        # Wrist camera pose in the tool frame, when the URDF has an optical frame for it.
+        self.T_tool_cam: np.ndarray | None = None
+        if PROFILE.camera_link:
+            T = np.eye(4)
+            link = PROFILE.camera_link
+            while link != TIP_LINK:
+                j = by_child[link]
+                o = j.find("origin")
+                T = _transform([float(v) for v in o.get("xyz", "0 0 0").split()], [float(v) for v in o.get("rpy", "0 0 0").split()]) @ T
+                link = j.find("parent").get("link")
+            self.T_tool_cam = np.linalg.inv(self.T_tip_tool) @ T
+            # the camera body sticks out of the gripper: keep it off the table too
+            self.extra_points_tool = np.array([self.T_tool_cam[:3, 3]])
 
     # ------------------------------------------------------------------ forward
 
@@ -271,6 +286,14 @@ class Kinematics:
         tip_mid = g.tips.mean(axis=0)
         base_top = j[1].copy()
         base_bottom = np.array([j[0][0], j[0][1], 0.0])
+        if self.n == 5:
+            return [
+                (base_bottom, base_top, 0.045),  # base + shoulder servos
+                (j[1], j[2], 0.025),  # upper arm
+                (j[2], j[3], 0.025),  # forearm
+                (j[3], g.wrist, 0.025),  # wrist
+                (g.wrist, tip_mid, 0.034),  # gripper
+            ]
         return [
             (base_bottom, base_top, 0.045),  # base + shoulder servos
             (j[1], j[2], 0.028),  # upper arm
@@ -285,9 +308,18 @@ class Kinematics:
     _COLLISION_PAIRS = ((0, 3), (0, 4), (0, 5), (1, 4), (1, 5), (2, 5))
     _PART_NAMES = ("base", "upper arm", "elbow", "forearm", "wrist", "gripper")
 
+    # the wrist sits right above the base whenever the arm is folded, so that pair is not checked
+    _COLLISION_PAIRS_5 = ((0, 4), (1, 4))
+    _PART_NAMES_5 = ("base", "upper arm", "forearm", "wrist", "gripper")
+
     def self_collision(self, q, margin: float = 0.0) -> str | None:
         """Name the first pair of body parts that overlap, or None."""
         segs = self.body_segments(q)
+        if self.n == 5:
+            for a, b in self._COLLISION_PAIRS_5:
+                if segment_distance(segs[a][0], segs[a][1], segs[b][0], segs[b][1]) < segs[a][2] + segs[b][2] + margin:
+                    return f"{self._PART_NAMES_5[b]} would hit the {self._PART_NAMES_5[a]}"
+            return None
         for a, b in self._COLLISION_PAIRS:
             pa, qa, ra = segs[a]
             pb, qb, rb = segs[b]
@@ -322,8 +354,8 @@ class Kinematics:
         extra_seeds=(),
         limit_margin: float = 0.05,
         pos_tol: float = 0.003,
-        ang_tol: float = math.radians(4.0),
-        approach_weight: float = 0.15,
+        ang_tol: float = math.radians(PROFILE.ik_ang_tol_deg),
+        approach_weight: float = PROFILE.ik_approach_weight,
         ref_weight: float = 0.01,
         random_seeds: int = 8,
         accept=None,

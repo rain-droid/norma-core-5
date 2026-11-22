@@ -24,8 +24,8 @@ import {
 } from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-/** How far the tool point can get from the base axis. */
-export const REACH_RADIUS = 0.43;
+/** Reach drawn until the loaded arm (or the daemon) says how far its tool point gets. */
+export const DEFAULT_REACH = 0.43;
 
 /** Mat extents in the base frame: the robot sits near the back edge, facing +y. */
 export const MAT = { minX: -0.56, maxX: 0.56, minY: -0.27, maxY: 0.61, corner: 0.03, thickness: 0.008 };
@@ -60,7 +60,8 @@ function gridMaterial(center: Vector2, half: Vector2): ShaderMaterial {
       uCenter: { value: center },
       uHalf: { value: half },
       uCorner: { value: MAT.corner },
-      uReach: { value: REACH_RADIUS },
+      uReach: { value: DEFAULT_REACH },
+      uAxis: { value: new Vector2(0, 0) },
       uColor: { value: new Color(CHALK) },
       uPx: { value: 1 },
     },
@@ -77,6 +78,7 @@ function gridMaterial(center: Vector2, half: Vector2): ShaderMaterial {
       uniform vec2 uHalf;
       uniform float uCorner;
       uniform float uReach;
+      uniform vec2 uAxis;
       uniform vec3 uColor;
       uniform float uPx;
       varying vec2 vP;
@@ -123,8 +125,8 @@ function gridMaterial(center: Vector2, half: Vector2): ShaderMaterial {
         a = max(a, tick * 0.42 * inside * (1.0 - smoothstep(0.1, 0.3, fwidth(along / 0.01))));
 
         // Reach arc: dashed circle around the base axis.
-        float r = length(p);
-        float ang = atan(p.y, p.x);
+        float r = length(p - uAxis);
+        float ang = atan(p.y - uAxis.y, p.x - uAxis.x);
         float dash = step(0.38, fract(ang * uReach / 0.028));
         a = max(a, stroke(r - uReach, 1.6 * uPx) * dash * 0.62 * inside);
 
@@ -156,6 +158,8 @@ function softShadowTexture(): CanvasTexture {
 export interface Stage {
   group: Group;
   setTableZ(z: number): void;
+  /** Radius of the dashed reach arc and the base-frame point (x, y) it is drawn around. */
+  setReach(reach: number, axis: [number, number]): void;
   setPixelRatio(px: number): void;
   dispose(): void;
 }
@@ -204,6 +208,10 @@ export function buildStage(): Stage {
   return {
     group,
     setTableZ,
+    setReach: (reach, axis) => {
+      grid.uniforms.uReach.value = reach;
+      (grid.uniforms.uAxis.value as Vector2).set(axis[0], axis[1]);
+    },
     setPixelRatio: (px) => {
       grid.uniforms.uPx.value = px;
     },

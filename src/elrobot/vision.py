@@ -90,6 +90,8 @@ class CameraModel:
     cy: float = 240.0
     k1: float = 0.0
     k2: float = 0.0
+    p1: float = 0.0
+    p2: float = 0.0
     # camera looks along the tool's approach axis (z), image right = tool x, image down = tool y
     rvec_tool_cam: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     t_tool_cam: list[float] = field(default_factory=lambda: [0.0, -0.045, -0.10])
@@ -102,7 +104,7 @@ class CameraModel:
 
     @property
     def dist(self) -> np.ndarray:
-        return np.array([self.k1, self.k2, 0.0, 0.0, 0.0])
+        return np.array([self.k1, self.k2, self.p1, self.p2, 0.0])
 
     @property
     def R_tool_cam(self) -> np.ndarray:

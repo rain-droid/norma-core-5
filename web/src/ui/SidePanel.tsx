@@ -26,7 +26,10 @@ function faultName(error: number): string {
   return names.length ? names.join(' + ') : `fault 0x${error.toString(16)}`;
 }
 
-const jointLabel = (id: number) => (id === 8 ? 'grip' : `J${id}`);
+/** The gripper is the last servo on either arm; it reports an open fraction (0..1), not an angle. */
+const isGripper = (j: JointState) => j.name === 'rev_motor_08';
+const jointLabel = (j: JointState) => (isGripper(j) ? 'grip' : `J${j.id}`);
+const jointValue = (j: JointState) => (isGripper(j) ? `${Math.round(j.q * 100)}%` : `${(j.q * DEG).toFixed(0)}°`);
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 function JointRow({ j }: { j: JointState }) {
@@ -41,18 +44,22 @@ function JointRow({ j }: { j: JointState }) {
 
   return (
     <div className="joint" data-fault={fault}>
-      <span className="joint__id">{jointLabel(j.id)}</span>
+      <span className="joint__id">{jointLabel(j)}</span>
       <span>
         <span
           className="range"
-          title={`${(j.q * DEG).toFixed(1)}° measured, ${(j.q_goal * DEG).toFixed(1)}° commanded, limits ${(j.lower * DEG).toFixed(0)}° to ${(j.upper * DEG).toFixed(0)}°`}
+          title={
+            isGripper(j)
+              ? `${Math.round(j.q * 100)}% open, ${Math.round(j.q_goal * 100)}% commanded`
+              : `${(j.q * DEG).toFixed(1)}° measured, ${(j.q_goal * DEG).toFixed(1)}° commanded, limits ${(j.lower * DEG).toFixed(0)}° to ${(j.upper * DEG).toFixed(0)}°`
+          }
         >
           {zero > 0.02 && zero < 0.98 && <i className="range__zero" style={{ left: `${zero * 100}%` }} />}
           <i className="range__goal" style={{ left: `${goal}%` }} />
           <i className="range__now" style={{ left: `${now}%` }} />
         </span>
       </span>
-      <span className="joint__num">{(j.q * DEG).toFixed(0)}°</span>
+      <span className="joint__num">{jointValue(j)}</span>
       <span title={`${Math.round(mA)} mA, load ${j.load}`}>
         <span className="load" data-high={load > 0.75}>
           <i style={{ transform: `scaleX(${load.toFixed(3)})` }} />
@@ -198,13 +205,13 @@ function Manual() {
       <div className="jog">
         {joints.map((j) => (
           <div className="jog__row" key={j.id}>
-            <span className="joint__id">{jointLabel(j.id)}</span>
-            <span>{(j.q * DEG).toFixed(0)}°</span>
+            <span className="joint__id">{jointLabel(j)}</span>
+            <span>{jointValue(j)}</span>
             <span className="jog__pair">
-              <button type="button" className="btn" disabled={off || !torque} onClick={() => jog(j.id, -1)} aria-label={`${jointLabel(j.id)} minus ${step} degrees`}>
+              <button type="button" className="btn" disabled={off || !torque} onClick={() => jog(j.id, -1)} aria-label={`${jointLabel(j)} minus ${step} degrees`}>
                 −
               </button>
-              <button type="button" className="btn" disabled={off || !torque} onClick={() => jog(j.id, 1)} aria-label={`${jointLabel(j.id)} plus ${step} degrees`}>
+              <button type="button" className="btn" disabled={off || !torque} onClick={() => jog(j.id, 1)} aria-label={`${jointLabel(j)} plus ${step} degrees`}>
                 +
               </button>
             </span>

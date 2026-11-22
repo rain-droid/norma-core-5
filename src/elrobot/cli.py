@@ -97,12 +97,21 @@ def main() -> None:
         p.add_argument("--port", type=int)
         p.add_argument("-v", "--verbose", action="store_true")
     sub.add_parser("station")
+    p = sub.add_parser("auto", help="give the autopilot an instruction, e.g. elrobot auto \"throw me the blue cube\"")
+    p.add_argument("prompt", nargs="+")
     p = sub.add_parser("call")
     p.add_argument("tool")
     p.add_argument("args", nargs="?")
     a = ap.parse_args()
 
     cfg = Config.load()
+    if a.cmd == "auto":
+        import httpx
+
+        base = f"http://{cfg.host}:{cfg.port}/api/autopilot"
+        text = " ".join(a.prompt)
+        print(httpx.post(base + "/stop" if text == "stop" else base, json={"prompt": text}, timeout=30).json())
+        return
     if a.cmd == "call":
         sys.exit(call(cfg, a.tool, a.args))
     if a.cmd == "station":

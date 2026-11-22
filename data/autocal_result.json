@@ -1,0 +1,11 @@
+{
+ "3": {
+  "tick": 2048,
+  "offset": 0,
+  "range_min": 2650,
+  "range_max": 2586,
+  "frozen": false,
+  "eeprom_limits": null,
+  "torque": 0
+ }
+}

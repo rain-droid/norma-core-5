@@ -28,7 +28,10 @@ from elrobot.config import REPO_ROOT, Config
 from elrobot.link import StationLink
 from elrobot.robot import Robot, RobotError
 
-SIT_FILE = REPO_ROOT / "data" / "sit_pose.json"
+from elrobot.profile import ACTIVE as PROFILE  # noqa: E402
+from elrobot.servo import ARM_IDS, GRIPPER_ID  # noqa: E402
+
+SIT_FILE = REPO_ROOT / "data" / ("sit_pose.json" if PROFILE.name == "elrobot" else f"sit_pose_{PROFILE.name}.json")
 
 
 def show(robot: Robot) -> None:
@@ -36,8 +39,8 @@ def show(robot: Robot) -> None:
     T = robot.kin.fk(q)
     m = robot.link.motors
     print("q deg     :", " ".join(f"{math.degrees(v):7.1f}" for v in q))
-    print("load      :", " ".join(f"{m[i].load:7d}" for i in range(1, 8)), f"| grip {m[8].load}")
-    print("temp      :", " ".join(f"{m[i].temp:7d}" for i in range(1, 8)), f"| grip {m[8].temp}")
+    print("load      :", " ".join(f"{m[i].load:7d}" for i in ARM_IDS), f"| grip {m[GRIPPER_ID].load}")
+    print("temp      :", " ".join(f"{m[i].temp:7d}" for i in ARM_IDS), f"| grip {m[GRIPPER_ID].temp}")
     print(f"tcp       : x={T[0, 3]:.3f} y={T[1, 3]:.3f} z={T[2, 3]:.3f}  approach=({T[0, 2]:.2f}, {T[1, 2]:.2f}, {T[2, 2]:.2f})"
           f"  pitch={math.degrees(math.asin(-T[2, 2])):.0f}deg")
     print(f"gripper   : open={robot.gripper_open():.2f} holding={robot.holding}  torque={robot.torque_on}")

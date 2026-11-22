@@ -26,6 +26,9 @@ from .config import Config
 from .kinematics import Kinematics
 from .link import Link, SimLink, StationLink
 from .robot import Robot, RobotError, Stopped
+from .profile import ACTIVE as PROFILE
+from .servo import GRIPPER_ID
+from .autopilot import Autopilot
 from .skills import GESTURES, Skills
 
 log = logging.getLogger("elrobot.daemon")
@@ -46,14 +49,24 @@ class Hub:
         self._task_lock = asyncio.Lock()  # one motion tool at a time
         self._current_call: str | None = None
         self.voice = None
+        self.autopilot = Autopilot(self, cfg)
 
     def _make_link(self) -> Link:
         cfg = self.cfg
         if cfg.sim:
             kin = Kinematics(cfg.urdf)
             limits = {j.id: (j.lower, j.upper) for j in kin.joints}
-            limits[8] = (kin.gripper_lower, kin.gripper_upper)
-            return SimLink(limits)
+            limits[GRIPPER_ID] = (kin.gripper_lower, kin.gripper_upper)
+            link = SimLink(limits)
+            cal = PROFILE.load_calibration()
+            if cal:  # lay the simulated servos out the way the real calibration does
+                for i, c in cal.items():
+                    m = link.motors[i]
+                    m.range_min, m.range_max = int(c["range_min"]), int(c["range_max"])
+                    start = 2048 if i != GRIPPER_ID else int(c["range_max"])
+                    m.tick = m.goal_tick = start
+                    link._pos[i] = float(start)
+            return link
         return StationLink(cfg.station_host, cfg.bus_serial, cfg.cameras)
 
     # ---- events
@@ -88,12 +101,14 @@ class Hub:
     def meta(self) -> dict:
         kin = self.robot.kin
         joints = [{"id": j.id, "name": j.name, "lower": round(float(kin.lower[j.id - 1]), 4), "upper": round(float(kin.upper[j.id - 1]), 4)} for j in kin.joints]
-        joints.append({"id": 8, "name": "rev_motor_08", "lower": 0.0, "upper": 1.0})
+        joints.append({"id": GRIPPER_ID, "name": "rev_motor_08", "lower": 0.0, "upper": 1.0})
         return {
             "type": "hello",
             "version": 1,
             "mode": self.link.mode,
-            "urdf": "/assets/elrobot/elrobot_follower.urdf",
+            "urdf": "/assets/" + PROFILE.urdf,
+            "robot": PROFILE.name,
+            "reach_m": PROFILE.reach_m,
             "joints": joints,
             "tools": toolreg.describe(),
             "gestures": list(GESTURES),
@@ -155,6 +170,8 @@ class Hub:
             return finish(False, f"internal error in {name}: {type(e).__name__}: {e}", "internal")
 
     async def stop(self) -> None:
+        self.autopilot._pending = None
+        await self.autopilot.cancel()
         await self.robot.stop()
         self.emit("log", level="warn", text="STOP: motion halted, holding position")
 
@@ -184,7 +201,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await hub.link.start()
-        tasks = [asyncio.create_task(state_loop()), asyncio.create_task(health_loop())]
+        tasks = [asyncio.create_task(state_loop()), asyncio.create_task(health_loop()), asyncio.create_task(hub.autopilot.perception_loop()),
+                 asyncio.create_task(hub.autopilot.warm_speech())]
         if hub.voice is not None:
             tasks.append(asyncio.create_task(_start_voice(hub)))
         yield
@@ -284,6 +302,51 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             return JSONResponse({"ok": False, "error": str(e)})
         hub.emit("log", level="info", text="torque on" if body.get("enable") else "torque off: the arm is limp")
         return {"ok": True}
+
+    @app.post("/api/autopilot")
+    async def autopilot_start(request: Request):
+        body = await request.json()
+        return JSONResponse(await hub.autopilot.start(body.get("prompt") or ""))
+
+    @app.post("/api/autopilot/stop")
+    async def autopilot_stop():
+        await hub.stop()
+        return {"ok": True}
+
+    @app.get("/api/autopilot")
+    async def autopilot_status():
+        return hub.autopilot.status()
+
+    @app.get("/api/autopilot/view.jpg")
+    async def autopilot_view():
+        fr = hub.link.frames.get("wrist")
+        if fr is None:
+            raise HTTPException(404, "no wrist frame")
+        from . import vision
+
+        return Response(vision.encode(hub.autopilot._grid_view(vision.decode(fr.jpeg))), media_type="image/jpeg")
+
+    @app.post("/api/autopilot/hush")
+    async def autopilot_hush():
+        hub.autopilot.hush()
+        return {"ok": True}
+
+    @app.post("/api/autopilot/voice")
+    async def autopilot_voice(request: Request):
+        return JSONResponse(await hub.autopilot.hear(await request.body(), request.headers.get("content-type"),
+                                                     need_name=request.headers.get("x-need-name") == "1"))
+
+    @app.get("/api/autopilot/audio/{clip_id}.wav")
+    async def autopilot_audio(clip_id: str):
+        tts = hub.autopilot.tts
+        path = tts.audio_path(clip_id) if tts is not None else None
+        if path is None:
+            raise HTTPException(404, "no such clip")
+        return Response(path.read_bytes(), media_type="audio/wav")
+
+    @app.get("/auto")
+    async def autopilot_page():
+        return Response((Path(__file__).parent / "autopilot.html").read_text(), media_type="text/html")
 
     app.mount("/assets", StaticFiles(directory=cfg.assets_dir), name="assets")
 

@@ -6,6 +6,7 @@ that takes the Skills object plus keyword arguments and returns a ToolResult.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -118,6 +119,24 @@ async def _scan(sk: Skills) -> ToolResult:
     return ToolResult(text, {"objects": [_seen(s) for s in seen]}, [jpeg])
 
 
+@tool(
+    "fetch",
+    "Do a whole pick in one call: look for the object of the given colour, on the table first and then held up in the "
+    "air (in someone's hand, on top of something), grasp it and lift it. Use this whenever the person asks to pick up / grab something you can "
+    "name by colour (e.g. 'the blue cube'). Fails with a clear reason if nothing of that colour is in reach or the "
+    "grasp closes on nothing; calling it again is a fine retry.",
+    {
+        "color": {"type": "string", "description": "blue, green, yellow, orange, red, pink or purple."},
+        "hand_over": {"type": "boolean", "description": "After lifting, hold it out towards the person (default false)."},
+    },
+    required=("color",),
+)
+async def _fetch(sk: Skills, color: str, hand_over: bool = False) -> ToolResult:
+    out = await sk.fetch(color, hand_over)
+    where = "took it out of the air (from a hand or off something)" if out.get("from") == "the air" else "lifted clear of the table"
+    return ToolResult(f"got the {color} object: holding it ({out['width_mm']} mm between the jaws), {where}.", out)
+
+
 def _seen(s) -> dict:
     return {"id": s.id, "x": s.xyz[0], "y": s.xyz[1], "size_mm": list(s.size_mm), "color": s.color, "pixel": list(s.pixel), "yaw": s.yaw_deg}
 
@@ -161,11 +180,12 @@ async def _pick(sk: Skills, object: int | None = None, x: float | None = None, y
     "Put down what the gripper is holding at a table position, then back away. Set `z` to the height of the "
     "surface if placing on top of something (for stacking, the height of the thing underneath). " + FRAME,
     {"x": NUM, "y": NUM, "z": {**NUM, "description": "Surface height above the table in metres (default 0)."},
-     "yaw": {**NUM, "description": "Jaw rotation in degrees (default 0)."}},
+     "yaw": {**NUM, "description": "Jaw rotation in degrees (default 0)."},
+     "pitch": {**NUM, "description": "Gripper tilt in degrees below horizontal to put it down with (default: the tilt it was picked up with, so it lands flat)."}},
     required=("x", "y"),
 )  # fmt: skip
-async def _place(sk: Skills, x: float, y: float, z: float = 0.0, yaw: float | None = None) -> ToolResult:
-    r = await sk.place(x, y, z, yaw)
+async def _place(sk: Skills, x: float, y: float, z: float = 0.0, yaw: float | None = None, pitch: float | None = None) -> ToolResult:
+    r = await sk.place(x, y, z, yaw, pitch)
     what = "put it down" if r["released_something"] else "opened the gripper (it was not holding anything)"
     return ToolResult(f"{what} at x={x:+.3f} y={y:+.3f}", r)
 
@@ -267,13 +287,14 @@ async def _move_relative(sk: Skills, dx: float = 0.0, dy: float = 0.0, dz: float
 )
 async def _move_joints(sk: Skills, joints: dict, relative: bool = False, speed: float = 0.8) -> ToolResult:
     q = sk.robot._plan_start()
+    n = len(q)
     for k, v in joints.items():
         i = int(k)
-        if not 1 <= i <= 7:
-            raise RobotError(f"joint {k} does not exist (arm joints are 1..7; use gripper() for the jaws)")
+        if not 1 <= i <= n:
+            raise RobotError(f"joint {k} does not exist (arm joints are 1..{n}; use gripper() for the jaws)")
         q[i - 1] = q[i - 1] + math.radians(float(v)) if relative else math.radians(float(v))
     lo, hi = sk.robot.kin.lower, sk.robot.kin.upper
-    over = [i + 1 for i in range(7) if q[i] < lo[i] - 1e-6 or q[i] > hi[i] + 1e-6]
+    over = [i + 1 for i in range(n) if q[i] < lo[i] - 1e-6 or q[i] > hi[i] + 1e-6]
     if over:
         lim = ", ".join(f"joint {i}: {math.degrees(lo[i - 1]):.0f}..{math.degrees(hi[i - 1]):.0f}" for i in over)
         raise RobotError(f"outside joint limits ({lim} degrees)")
@@ -299,12 +320,76 @@ async def _rest(sk: Skills) -> ToolResult:
 @tool(
     "gesture",
     "Perform an expressive motion. dap: hold out a closed fist for a fist bump and wait up to 6 s to feel it land. "
-    "wave: wave hello. nod / shake: yes / no. bow, shrug, dance, peek (look left and right).",
-    {"name": {"type": "string", "enum": list(GESTURES)}},
+    "handshake: hold the open hand out, and shake when the person takes it. wave: wave hello. nod / shake: yes / no "
+    "(shake is the head shake, not a handshake). bow, shrug, dance, peek, happy, sad, curious, celebrate, oops. "
+    "`side` is where the person is for dap and handshake.",
+    {"name": {"type": "string", "enum": list(GESTURES)}, "side": {"type": "string", "enum": ["left", "center", "right"]}},
     required=("name",),
 )
-async def _gesture(sk: Skills, name: str) -> ToolResult:
-    return ToolResult(await sk.gesture(name))
+async def _gesture(sk: Skills, name: str, side: str = "center") -> ToolResult:
+    return ToolResult(await sk.gesture(name, side))
+
+
+@tool(
+    "throw",
+    "Throw what is in the gripper in an arc: winds up overhead, whips forward and lets go. Give `color` to pick that "
+    "object up first. `pan` aims it in degrees, left (-) or right (+) of straight ahead, up to 85 either way; leave it "
+    "out with `here` true to throw where the arm is facing now. `style`: high lob, normal, or flat (a flatter, longer "
+    "pass). `dry` is a practice swing that lets go of nothing.",
+    {"color": {"type": "string", "description": "pick up the object of this colour first"},
+     "pan": {"type": "number"}, "here": {"type": "boolean"}, "style": {"type": "string", "enum": ["high", "normal", "flat"]},
+     "dry": {"type": "boolean", "description": "practice swing without letting go"}},
+)
+async def _throw(sk: Skills, color: str | None = None, pan: float = 0.0, here: bool = False, style: str = "normal", dry: bool = False) -> ToolResult:
+    out = await sk.throw(color, None if here else pan, 50.0, dry, style)
+    aim = "straight ahead" if abs(out["pan"]) < 8 else f"{abs(out['pan'])} degrees to my {'right' if out['pan'] > 0 else 'left'}"
+    if dry:
+        return ToolResult(f"practice swing done towards {aim}, nothing let go")
+    if not out.get("released"):
+        return ToolResult(f"swung towards {aim}, but the jaws did not open in time; it may have dropped late")
+    return ToolResult(f"thrown towards {aim} ({out['style']}): let go at about {out['speed']} m/s, {out['elevation']:.0f} deg above level. "
+                      "It is gone, nothing is held now.")
+
+
+@tool("lineup", "Big, slow, wavy sweeping motion through the air for a while ('line me up', 'make it straight'). Keeps hold of whatever "
+      "is in or attached to the gripper and does not need the camera.", {"seconds": {"type": "number"}})
+async def _lineup(sk: Skills, seconds: float = 25.0) -> ToolResult:
+    return ToolResult(await sk.lineup(seconds))
+
+
+@tool("take", "Take something from the person's hand: hold the open gripper out, and close when they put it between the jaws and tap.",
+      {"side": {"type": "string", "enum": ["left", "center", "right"]}})
+async def _take(sk: Skills, side: str = "center") -> ToolResult:
+    return ToolResult(await sk.take(side))
+
+
+@tool("catch", "Catch something rolled along the table: open jaws on the table facing the person, snap shut when it rolls in.",
+      {"side": {"type": "string", "enum": ["left", "center", "right"]}})
+async def _catch(sk: Skills, side: str = "center") -> ToolResult:
+    return ToolResult(await sk.catch(side))
+
+
+@tool("give", "Hand over what is in the gripper: hold it out towards the person's hand, wait a moment, then let go. "
+      "`side` is where their hand is from the robot's own point of view.",
+      {"side": {"type": "string", "enum": ["left", "center", "right"]}})
+async def _give(sk: Skills, side: str = "center") -> ToolResult:
+    out = await sk.give(side)
+    if out.startswith("FAILED"):
+        raise RobotError(out[7:])
+    return ToolResult(out)
+
+
+@tool("turn", "Turn the head without going anywhere: left / right swings the whole arm about its base, up / down tilts the "
+      "wrist camera. Never lets go of what is held.",
+      {"direction": {"type": "string", "enum": ["left", "right", "up", "down"]}, "degrees": {"type": "number"}},
+      required=("direction",))
+async def _turn(sk: Skills, direction: str, degrees: float | None = None) -> ToolResult:
+    return ToolResult(await sk.turn(direction, degrees))
+
+
+@tool("search", "Turn the raised camera to look around (left, then right, then ahead on repeated calls). Never lets go of what is held.")
+async def _search(sk: Skills) -> ToolResult:
+    return ToolResult(await sk.search())
 
 
 @tool("stop", "Stop all motion immediately and hold position. Always allowed, even while another tool is running.", motion=False)

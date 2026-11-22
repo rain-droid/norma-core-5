@@ -27,6 +27,10 @@ export interface Hello {
   version: number;
   mode: Mode;
   urdf: string;
+  /** Which arm this is (`so101`, `elrobot`). */
+  robot?: string;
+  /** How far the tool point gets from the shoulder axis, metres. */
+  reach_m?: number;
   joints: JointMeta[];
   tools: ToolMeta[];
   gestures: string[];

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from .profile import ACTIVE as _PROFILE
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -18,14 +20,15 @@ class Config:
     host: str = "127.0.0.1"
     port: int = 8765
     sim: bool = False
-    voice: bool = True  # start the conversational agent with the daemon
+    voice: bool = False  # the older Claude-based voice agent; the autopilot has its own voice and does not need it
     bus_serial: str | None = None
     # camera unique-id substring -> name. The two cameras are the same model, so they can only be
     # told apart by the USB port they are on; `scripts/probe.py` prints the ids.
     cameras: dict[str, str] = field(default_factory=dict)
 
     # --- paths
-    urdf: Path = REPO_ROOT / "assets/elrobot/elrobot_follower.urdf"
+    robot: str = _PROFILE.name  # which arm: see profile.py
+    urdf: Path = REPO_ROOT / "assets" / _PROFILE.urdf
     assets_dir: Path = REPO_ROOT / "assets"
     web_dist: Path = REPO_ROOT / "web/dist"
     data_dir: Path = REPO_ROOT / "data"
@@ -59,7 +62,11 @@ class Config:
     # a joint that lags its command by this much for this long means the arm is blocked
     stall_error: float = 0.22
     stall_time: float = 0.45
+    stall_lag_time: float = 0.28  # s of following delay allowed at the commanded speed
     stale_state_s: float = 0.4
+
+    # --- throwing
+    throw_release_at: float = 0.09  # s after the swing is commanded that the jaws are told to open
 
     # --- gripper
     gripper_speed: int = 1500  # ticks/s
@@ -67,6 +74,22 @@ class Config:
     grasp_squeeze_ticks: int = 40  # how far past the stall point to hold an object
     holding_min_open: float = 0.06  # jaws stopped wider than this => holding something
     gripper_open_at_max: bool = True  # which end of the gripper servo's arc is "open"
+
+    # --- autopilot: perception loop + OpenAI decision model (see autopilot.py)
+    autopilot_model: str = "gpt-6-luna"
+    autopilot_base_url: str = "https://api.openai.com/v1"
+    autopilot_tier: str = "priority"  # service_tier, e.g. "priority" for faster tokens where the account has it
+    autopilot_reasoning: str = "none"  # reasoning_effort for reasoning models ("minimal", "low", ...); empty = not sent
+    autopilot_percept_hz: float = 15.0  # the cameras deliver 15 frames a second
+    autopilot_window_s: float = 2.0  # how much perception history the model sees
+    autopilot_history: int = 8  # perception lines per decision, spread over the window
+    autopilot_min_period: float = 0.4  # s between decision requests
+    autopilot_parallel: int = 3  # decision requests in flight at once
+    autopilot_max_steps: int = 10  # actions per instruction before it stops and hands back to the person
+    autopilot_max_waypoints: int = 8
+    autopilot_images: bool = True  # send the camera frames with every decision so the model really sees the scene
+    autopilot_speed: float = 1.4
+    autopilot_max_s: float = 120.0
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Config":

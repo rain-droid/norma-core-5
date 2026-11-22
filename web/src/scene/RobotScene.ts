@@ -16,6 +16,7 @@ import type { RobotState, WorldMarker } from '../api/types.ts';
 import { live, type Plan, type Sample } from '../state/app.ts';
 import { LabelLayer, Markers, PlanOverlay, Trail } from './overlays.ts';
 import {
+  GRIPPER_JOINT,
   applyGripper,
   loadRobot,
   makeGhost,
@@ -23,9 +24,10 @@ import {
   setClipping,
   setServoFault,
   type LoadProgress,
+  type RobotInfo,
   type RobotModel,
 } from './robot.ts';
-import { buildLights, buildStage, type Stage } from './stage.ts';
+import { buildLights, buildStage, DEFAULT_REACH, type Stage } from './stage.ts';
 
 /**
  * Scene orientation. The daemon, the URDF, plans and markers all use the
@@ -35,18 +37,29 @@ import { buildLights, buildStage, type Stage } from './stage.ts';
  */
 const WORLD_ROTATION_X = -Math.PI / 2;
 
-/** Render this far behind the newest state so there are always two samples to blend. */
-const INTERP_DELAY_MS = 70;
+/**
+ * Render this far behind the newest state so there are always two samples to
+ * blend. State arrives every 33 ms; this covers one late message.
+ */
+const INTERP_DELAY_MS = 55;
+/** Time constant of the last-stage smoothing that rounds off the corners between samples. */
+const SMOOTH_TAU_S = 0.022;
 
 const FOV = 30;
-/** What the default view frames, in three world coordinates. */
-const VIEW_TARGET = new Vector3(0.0, 0.135, -0.15);
 /** Direction from the target to the camera: front-right of the robot, looking down a little. */
 const VIEW_AZIMUTH = (124 * Math.PI) / 180;
 const VIEW_POLAR = (63 * Math.PI) / 180;
-/** Half extents (metres) that must stay visible between the panels. */
-const FIT_HALF_WIDTH = 0.47;
-const FIT_HALF_HEIGHT = 0.31;
+/**
+ * The default view frames the arm's working volume, sized from its reach:
+ * the point looked at (above the table, ahead of the shoulder axis) and the
+ * half extents that must stay visible between the panels, all in reaches.
+ */
+const VIEW_HEIGHT = 0.36;
+const VIEW_AHEAD = 0.22;
+const FIT_HALF_WIDTH = 0.84;
+const FIT_HALF_HEIGHT = 0.62;
+/** Cap on rendered pixels per CSS pixel: past this the picture does not get sharper, only slower. */
+const MAX_PIXEL_RATIO = 2;
 
 export interface Insets {
   left: number;
@@ -76,6 +89,14 @@ export class RobotScene {
   private ghostOpacity = 0;
   private ghostEnabled = true;
   private faults = new Map<number, boolean>();
+  /** Joint values currently drawn, by URDF joint name (measured, and commanded for the ghost). */
+  private shown = new Map<string, { q: number; goal: number }>();
+  private shownOpen = Number.NaN;
+  private shownEe: [number, number, number] = [Number.NaN, Number.NaN, Number.NaN];
+  private reach = DEFAULT_REACH;
+  private reachFromDaemon = false;
+  private baseAxis: [number, number] = [0, 0];
+  private loadToken = 0;
 
   private clip = new Plane(new Vector3(0, -1, 0), 0);
   private reveal: { t0: number; from: number; to: number } | null = null;
@@ -94,7 +115,7 @@ export class RobotScene {
     labelHost: HTMLElement,
   ) {
     const renderer = new WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
     renderer.setClearColor(0x000000, 0);
     renderer.toneMapping = NeutralToneMapping;
     renderer.toneMappingExposure = 1.06;
@@ -120,7 +141,7 @@ export class RobotScene {
     const controls = new OrbitControls(this.camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.09;
-    controls.minDistance = 0.45;
+    controls.minDistance = 0.22;
     controls.maxDistance = 3.4;
     controls.minPolarAngle = 0.12;
     controls.maxPolarAngle = 1.5; // never dip under the table
@@ -149,11 +170,21 @@ export class RobotScene {
 
   /* ------------------------------ public ------------------------------ */
 
-  async loadRobot(urdfUrl: string, onProgress: (p: LoadProgress) => void): Promise<void> {
-    const model = await loadRobot(urdfUrl, onProgress);
-    if (this.disposed) return;
+  /** Loads the arm the daemon describes, replacing any arm already on the mat. */
+  async loadRobot(urdfUrl: string, info: RobotInfo, onProgress: (p: LoadProgress) => void): Promise<void> {
+    const token = ++this.loadToken;
+    const model = await loadRobot(urdfUrl, info, onProgress);
+    if (this.disposed || token !== this.loadToken) return;
+    this.removeModel();
     this.model = model;
     this.world.add(model.robot);
+    this.faults.clear();
+    this.shown.clear();
+    this.shownOpen = Number.NaN;
+    this.baseAxis = model.baseAxis;
+    if (!this.reachFromDaemon) this.reach = model.reach;
+    this.stage.setReach(this.reach, this.baseAxis);
+    if (!this.userMoved && !this.flight) this.placeCamera(this.defaultView());
 
     this.ghost = makeGhost(model.robot, this.ghostMaterial);
     this.ghost.visible = false;
@@ -166,6 +197,28 @@ export class RobotScene {
       this.clip.constant = this.tableZ;
       this.reveal = { t0: performance.now(), from: this.tableZ - 0.01, to: this.tableZ + 0.56 };
     }
+  }
+
+  /** The reach the daemon plans with, when it says; otherwise the model's own estimate is used. */
+  setReach(reach: number | null): void {
+    this.reachFromDaemon = reach !== null && reach > 0;
+    if (this.reachFromDaemon) this.reach = reach as number;
+    else if (this.model) this.reach = this.model.reach;
+    this.stage.setReach(this.reach, this.baseAxis);
+    if (!this.userMoved && !this.flight) this.placeCamera(this.defaultView());
+  }
+
+  private removeModel(): void {
+    if (this.model) {
+      this.world.remove(this.model.robot);
+      this.model.materials.forEach((m) => m.dispose());
+      this.model = null;
+    }
+    if (this.ghost) {
+      this.world.remove(this.ghost);
+      this.ghost = null;
+    }
+    this.reveal = null;
   }
 
   setTableZ(z: number): void {
@@ -246,18 +299,19 @@ export class RobotScene {
   private defaultView(): { pos: Vector3; target: Vector3 } {
     const free = this.free();
     const tan = Math.tan((FOV * Math.PI) / 360);
+    const r = this.reach;
     const d = Math.max(
-      (FIT_HALF_WIDTH * this.size.y) / (free.w * tan),
-      (FIT_HALF_HEIGHT * this.size.y) / (free.h * tan),
+      (FIT_HALF_WIDTH * r * this.size.y) / (free.w * tan),
+      (FIT_HALF_HEIGHT * r * this.size.y) / (free.h * tan),
     );
-    const dist = Math.min(3.2, Math.max(0.8, d));
+    const dist = Math.min(3.2, Math.max(0.5, d));
     const dir = new Vector3(
       Math.sin(VIEW_POLAR) * Math.sin(VIEW_AZIMUTH),
       Math.cos(VIEW_POLAR),
       Math.sin(VIEW_POLAR) * Math.cos(VIEW_AZIMUTH),
     );
-    const target = VIEW_TARGET.clone();
-    target.y += this.tableZ;
+    // Base frame (x right, y forward, z up) to three (x, z, -y).
+    const target = new Vector3(this.baseAxis[0], this.tableZ + VIEW_HEIGHT * r, -(this.baseAxis[1] + VIEW_AHEAD * r));
     return { pos: target.clone().addScaledVector(dir, dist), target };
   }
 
@@ -284,7 +338,7 @@ export class RobotScene {
     const h = Math.max(1, this.host.clientHeight);
     if (w === this.size.x && h === this.size.y) return;
     this.size.set(w, h);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
     this.renderer.setSize(w, h);
     this.stage.setPixelRatio(this.renderer.getPixelRatio());
     this.plan.setResolution(this.size);
@@ -355,13 +409,13 @@ export class RobotScene {
     const sa: RobotState = a.s;
     const sb: RobotState = b.s;
 
-    if (sa.ee?.pos && sb.ee?.pos) {
-      this.trail.push(
-        [lerp(sa.ee.pos[0], sb.ee.pos[0], k), lerp(sa.ee.pos[1], sb.ee.pos[1], k), lerp(sa.ee.pos[2], sb.ee.pos[2], k)],
-        now,
-      );
-    }
     if (!model) return;
+
+    // Follow the interpolated sample through a short low-pass: motion stays
+    // continuous even when a message is late or two carry the same reading.
+    const follow = 1 - Math.exp(-dt / SMOOTH_TAU_S);
+    const ease = (from: number, to: number) =>
+      Number.isFinite(from) && Math.abs(to - from) < 0.6 ? from + (to - from) * follow : to;
 
     let lag = 0;
     const n = Math.min(sa.joints?.length ?? 0, sb.joints?.length ?? 0);
@@ -373,17 +427,28 @@ export class RobotScene {
         this.faults.set(jb.id, fault);
         setServoFault(model, jb.id, fault);
       }
-      // Servo 8 is the gripper; its three URDF joints are driven below.
-      if (jb.id < 1 || jb.id > 7) continue;
-      const name = jb.name in model.robot.joints ? jb.name : `rev_motor_0${jb.id}`;
-      const q = lerp(ja.q, jb.q, k);
+      // Joints are matched by URDF name. The gripper reports an open fraction,
+      // not an angle; its URDF joints are driven below.
+      if (jb.name === GRIPPER_JOINT || !(jb.name in model.robot.joints)) continue;
+      let cur = this.shown.get(jb.name);
+      if (!cur) this.shown.set(jb.name, (cur = { q: Number.NaN, goal: Number.NaN }));
+      cur.q = ease(cur.q, lerp(ja.q, jb.q, k));
       const goal = lerp(ja.q_goal, jb.q_goal, k);
-      model.robot.setJointValue(name, q);
-      this.ghost?.setJointValue(name, goal);
-      if (Number.isFinite(goal)) lag = Math.max(lag, Math.abs(goal - q));
+      cur.goal = Number.isFinite(goal) ? ease(cur.goal, goal) : cur.q;
+      model.robot.setJointValue(jb.name, cur.q);
+      this.ghost?.setJointValue(jb.name, cur.goal);
+      lag = Math.max(lag, Math.abs(cur.goal - cur.q));
     }
-    const open = lerp(sa.gripper?.open ?? 1, sb.gripper?.open ?? 1, k);
+    const open = ease(this.shownOpen, lerp(sa.gripper?.open ?? 1, sb.gripper?.open ?? 1, k));
+    this.shownOpen = open;
     applyGripper(model.robot, open);
+
+    // The tool point gets the same smoothing so it stays glued to the gripper.
+    if (sa.ee?.pos && sb.ee?.pos) {
+      const e = this.shownEe;
+      for (let i = 0; i < 3; i++) e[i] = ease(e[i], lerp(sa.ee.pos[i], sb.ee.pos[i], k));
+      this.trail.push([e[0], e[1], e[2]], now);
+    }
 
     // The ghost shows the commanded pose only while it differs from the measured one.
     if (this.ghost) {

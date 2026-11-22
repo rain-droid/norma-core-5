@@ -24,8 +24,10 @@ REG_MOVING = 0x42
 REG_PRESENT_CURRENT = 0x45
 STATE_DUMP_LEN = 0x47  # the Station publishes registers 0x00..0x46 for every servo
 
-ARM_IDS = (1, 2, 3, 4, 5, 6, 7)
-GRIPPER_ID = 8
+from .profile import ACTIVE as _PROFILE  # noqa: E402
+
+ARM_IDS = _PROFILE.arm_ids
+GRIPPER_ID = _PROFILE.gripper_id
 ALL_IDS = ARM_IDS + (GRIPPER_ID,)
 
 
@@ -62,6 +64,7 @@ class MotorState:
     range_max: int = 0
     range_frozen: bool = False
     has_error: bool = False  # bus-level error reported by the Station for this servo
+    stamp_ns: int = 0  # when the Station last read this servo (its monotonic clock)
     offset: int = 0  # EEPROM position offset; raw encoder position = (tick + offset) mod 4096
 
     @property
@@ -89,7 +92,7 @@ class MotorState:
             temp=dump[REG_PRESENT_TEMPERATURE],
             status=dump[REG_STATUS],
             moving=dump[REG_MOVING] != 0,
-            offset=struct.unpack_from("<h", dump, REG_OFFSET)[0],
+            offset=_signed(_u16(dump, REG_OFFSET), 11),  # sign-magnitude, sign in bit 11
             **extra,
         )
 
