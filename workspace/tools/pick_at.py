@@ -18,7 +18,8 @@ in; along the finger pads it stays wherever x, y put it.
 `yaw_deg` find_objects reported so the jaws close across a flat side. The jaws open 53 mm.
 `grasp_height` is where the tool point ends up above the table: about half the object's height.
 The fingertips are 12 mm beyond the tool point and the stretched arm sags a few millimetres, so
-below about 0.020 they press into the mat; never less than 0.013. Beyond about 27 cm the
+below 0.020 they press into the mat, so anything lower is raised to 0.020 (MIN_GRASP_HEIGHT; the
+result says so). A short object is then gripped by its upper part. Beyond about 27 cm the
 gripper has to lean, and leaning jaws that are also turned (`yaw_deg` not 0) dip one fingertip
 towards the table.
 
@@ -38,6 +39,8 @@ import numpy as np
 from util import capture, vision
 from util.arm import RobotError
 from util.motion import require_ready, tcp_report
+
+MIN_GRASP_HEIGHT = 0.020  # metres above the table; lower values are raised to this
 
 
 def refine_target(ctx, target: np.ndarray, max_shift: float = 0.05) -> np.ndarray:
@@ -63,6 +66,9 @@ def pick_at(ctx, x: float, y: float, yaw_deg: float | None = None, grasp_height:
         raise RobotError("already holding something; place it first")
     target = np.array([x, y, plan.table_z], dtype=float)
     corrections = []
+    # the fingertips reach 12 mm past the tool point and the arm sags: below MIN_GRASP_HEIGHT they dig into the mat
+    asked_height = grasp_height
+    grasp_height = max(grasp_height, MIN_GRASP_HEIGHT)
 
     # plan the whole approach before anything moves, so an impossible grasp is refused with the arm where it was
     approach, pitch, q_hover, hover_pos, grasp = plan.approach_for(target, grasp_height, yaw_deg)
@@ -101,6 +107,8 @@ def pick_at(ctx, x: float, y: float, yaw_deg: float | None = None, grasp_height:
         "width_mm": grip["width_mm"],
         "picked_from": [round(float(target[0]), 3), round(float(target[1]), 3)],
         "refine_corrections_mm": corrections,
+        "grasp_height_m": round(grasp_height, 3),
+        **({"note": f"grasp_height {asked_height} raised to {MIN_GRASP_HEIGHT}: lower digs into the mat"} if grasp_height != asked_height else {}),
         "approach_pitch_deg": pitch,
         "tcp": tcp_report(res["tcp"], res["gripper"]),
     }

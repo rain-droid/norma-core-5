@@ -44,6 +44,13 @@ When objects stand close together, or the object is long or lies at an angle:
    says why it rejects the ones it does. Open `grasp_image`. `pick: true` performs the best
    one, opening the jaws only as far as it needs. If nothing survives, move a neighbour first.
 
+A ring wider than the jaws (the brown rubber one is about 9 cm across, wall about 23 mm) is
+picked by its rim, not by name: `pick_object` aims at the tracked centre, which is the hole
+(and the tracker's cross sits on the ring's edge, not its middle). Read the ring's centre and
+one rim point to the robot's left or right of it off `capture_camera`, `pixel_to_table` the rim
+point, and `pick_at` there with `yaw_deg: 0`, `grasp_height: 0.02`: one finger goes down the
+hole. `place_at` then puts the rim point, not the centre, at x, y.
+
 What the errors mean:
 
 - "gave up after 25 s: the work area is not quiet (...)": only under a tracker set to stop
