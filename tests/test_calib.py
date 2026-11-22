@@ -130,3 +130,26 @@ def test_hand_eye_recovers_wrist_mount():
     assert np.linalg.norm(res.T_tool_cam[:3, 3] - X_true[:3, 3]) < 0.004, res.T_tool_cam[:3, 3]
     assert calib.rotation_deg(res.T_tool_cam[:3, :3], X_true[:3, :3]) < 1.0
     assert np.mean(res.spread_mm) < 3
+
+
+def test_hand_eye_turns_back_boards_seen_the_other_way_up():
+    rng = np.random.default_rng(7)
+    from scipy.spatial.transform import Rotation as Rot
+
+    board = calib.Chessboard(8, 6, 0.025)
+    X_true = calib.make_T(Rot.from_euler("xyz", [-27, -4, 4], degrees=True).as_matrix(), [-0.003, -0.067, -0.068])
+    T_base_board = calib.make_T(np.diag([1.0, -1.0, -1.0]), [-0.1, 0.3, 0.0])
+    half_turn = calib.make_T(np.diag([-1.0, -1.0, 1.0]), [7 * 0.025, 5 * 0.025, 0.0])
+    tools, boards = [], []
+    for i in range(15):
+        eye = np.array([rng.uniform(-0.15, 0.05), rng.uniform(0.1, 0.3), rng.uniform(0.2, 0.35)])
+        T_cam = _look_at(eye, np.array([-0.04, 0.26, 0.0]) + rng.normal(0, 0.02, 3), up=rng.normal(0, 1, 3))
+        tools.append(T_cam @ calib.invert(X_true))
+        seen = calib.invert(T_cam) @ T_base_board
+        boards.append(seen @ half_turn if i in (3, 12) else seen)  # the detector counted from the far corner
+    assert np.mean(calib.solve_hand_eye(tools, boards).spread_mm) > 20  # what two such samples do
+    fixed, turned = calib.unflip_boards(tools, boards, board)
+    assert turned == [3, 12]
+    res = calib.solve_hand_eye(tools, fixed)
+    assert np.linalg.norm(res.T_tool_cam[:3, 3] - X_true[:3, 3]) < 0.002
+    assert np.mean(res.spread_mm) < 1

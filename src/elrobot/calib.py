@@ -327,6 +327,28 @@ class HandEyeResult:
     method: str
 
 
+def unflip_boards(T_base_tool: list[np.ndarray], T_cam_board: list[np.ndarray], board: Chessboard) -> tuple[list[np.ndarray], list[int]]:
+    """Board poses with every sample using the same corner as the board's origin.
+
+    A chessboard with an even number of corners one way looks the same turned by 180 degrees, so
+    the detector starts counting from either end depending on how the camera is turned. Such a
+    sample puts the board half a turn round and a board's length away, and ruins the hand-eye
+    solution. The board does not move, so the samples that disagree with most of the others about
+    which way its x axis points are the turned ones. Returns the poses and which were turned back.
+    """
+    half_turn = make_T(np.diag([-1.0, -1.0, 1.0]), [(board.cols - 1) * board.square_m, (board.rows - 1) * board.square_m, 0.0])
+    boards, turned = [np.array(T, dtype=float) for T in T_cam_board], set()
+    for _ in range(4):
+        res = solve_hand_eye(T_base_tool, boards)
+        wrong = [i for i, (Tg, Tc) in enumerate(zip(T_base_tool, boards)) if (Tg @ res.T_tool_cam @ Tc)[:3, 0] @ res.T_base_board[:3, 0] < 0]
+        if not wrong or len(wrong) * 2 >= len(boards):
+            break
+        for i in wrong:
+            boards[i] = boards[i] @ half_turn
+            turned ^= {i}
+    return boards, sorted(turned)
+
+
 def solve_hand_eye(T_base_tool: list[np.ndarray], T_cam_board: list[np.ndarray]) -> HandEyeResult:
     """Camera pose on the tool from >= 3 (better 12+) samples with clearly different orientations.
 

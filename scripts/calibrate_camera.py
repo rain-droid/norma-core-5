@@ -59,11 +59,45 @@ from elrobot.config import REPO_ROOT, Config
 # ----------------------------------------------------------------------------- feedback
 
 
-def say(text: str) -> None:
+def say(text: str, voice: str | None = None) -> None:
     """Print, and speak on a Mac so you can watch the board instead of the terminal."""
     print(f"  {text}", flush=True)
     if shutil.which("say"):
-        subprocess.Popen(["say", "-r", "200", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(["say", "-r", "200", *(["-v", voice] if voice else []), text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+# Spoken with --guide during the wrist hand-eye run, one before each pose, in this order. The
+# views that the first runs on this arm lacked come first: straight down, from the robot's left,
+# close up. Lay the board about 19 cm in front of the base so the arm can get above and beside it.
+GUIDE_VOICE = "Anna"
+GUIDE = [
+    "Senkrecht von oben aufs Brett, Greifer gerade.",
+    "Senkrecht von oben, Greifer eine Vierteldrehung nach links gedreht.",
+    "Senkrecht von oben, Greifer eine Vierteldrehung nach rechts gedreht.",
+    "Steil von oben, etwas nach vorne gekippt.",
+    "Steil von oben, etwas zurück gekippt, Greifer verdreht.",
+    "Arm nach links schwenken. Von links aufs Brett schauen, von hoch oben.",
+    "Von links, mittlere Höhe.",
+    "Von links, tief und flach.",
+    "Von links, mittlere Höhe, Greifer verdreht.",
+    "Von links, näher am Roboter.",
+    "Nah ran, von oben. Das Brett soll das Bild fast füllen.",
+    "Nah ran, schräg von links.",
+    "Nah ran, schräg von rechts.",
+    "Arm nach rechts schwenken. Von rechts aufs Brett schauen, von hoch oben.",
+    "Von rechts, tief und flach.",
+    "Von rechts, mittlere Höhe, Greifer verdreht.",
+    "Von der Roboterseite, flach nach vorne schauen.",
+    "Von der Roboterseite, flach, Greifer nach links verdreht.",
+    "Von der Roboterseite, flach, Greifer nach rechts verdreht.",
+    "Zum Schluss: weit weg und hoch, das Brett klein im Bild.",
+]
+
+
+def guide(n: int, count: int, on: bool) -> None:
+    """Say which pose comes next."""
+    if on and n < count:
+        say(f"Pose {n + 1}. {GUIDE[n % len(GUIDE)]}", GUIDE_VOICE)
 
 
 class Preview:
@@ -355,6 +389,16 @@ class Daemon:
             raise SystemExit(f"torque {'on' if enable else 'off'} failed: {res.get('error')}")
 
 
+def confirm(prompt: str) -> bool:
+    """Wait for Enter. False when nobody can press it (started without a terminal)."""
+    try:
+        input(prompt)
+        return True
+    except EOFError:
+        print()
+        return False
+
+
 def tool_pose(state: dict) -> np.ndarray:
     """T_base_tool (TCP) from a daemon state message."""
     from scipy.spatial.transform import Rotation
@@ -464,8 +508,10 @@ def cmd_extrinsics_fixed(cfg: Config, args) -> int:
                 break
     finally:
         if torque_off:
-            input("\nHold the arm: torque comes back on where it is now. Press Enter ... ")
-            daemon.torque(True)
+            if confirm("\nHold the arm: torque comes back on where it is now. Press Enter ... "):
+                daemon.torque(True)
+            else:
+                print("no terminal to confirm on: the arm stays limp")
 
     if len(points) < 4:
         print(f"only {len(points)} points; need at least 4")
@@ -512,6 +558,10 @@ def cmd_extrinsics_wrist(cfg: Config, args) -> int:
     daemon = Daemon(cfg)
     model = load_lens(cfg, args.cam)
     board = calib.Chessboard(cols=args.cols, rows=args.rows, square_m=args.square_mm / 1000.0)
+    if args.from_dir:
+        kept = json.loads((Path(args.from_dir) / "samples.json").read_text())
+        print(f"{len(kept)} samples from {args.from_dir}")
+        return solve_wrist(cfg, args, model, board, [np.array(k["T_base_tool"]) for k in kept], [np.array(k["T_cam_board"]) for k in kept])
     session = REPO_ROOT / "logs/calib" / f"{args.cam}-extrinsics" / datetime.now().strftime("%Y%m%d-%H%M%S")
     session.mkdir(parents=True, exist_ok=True)
     preview = Preview(args.port)
@@ -521,9 +571,12 @@ def cmd_extrinsics_wrist(cfg: Config, args) -> int:
     if args.keep_torque:
         print("Torque stays on: move the arm with the web UI or tools; a sample is taken whenever it is still.")
     else:
-        input("The arm goes LIMP now. Hold it, then press Enter ... ")
+        confirm("The arm goes LIMP now. Hold it, then press Enter ... ")
         daemon.torque(False)
-    say(f"Move the arm so the wrist camera sees the whole board, from {args.count} clearly different angles.")
+    if args.guide:
+        guide(0, args.count, True)
+    else:
+        say(f"Move the arm so the wrist camera sees the whole board, from {args.count} clearly different angles.")
     try:
         last_hint = 0.0
         while len(tools) < args.count:
@@ -539,8 +592,8 @@ def cmd_extrinsics_wrist(cfg: Config, args) -> int:
                     diff = min((calib.rotation_deg(T[:3, :3], P[:3, :3]) for P in tools), default=1e9)
                     if diff < args.min_deg:
                         status = f"only {diff:.0f} deg from an earlier view: tilt or turn the gripper more"
-                        if time.monotonic() - last_hint > 6:
-                            say("Tilt or turn the gripper more.")
+                        if time.monotonic() - last_hint > 8:
+                            say("Stärker kippen oder drehen.", GUIDE_VOICE) if args.guide else say("Tilt or turn the gripper more.")
                             last_hint = time.monotonic()
                     else:
                         # the frame must show the pose we measured: check again after grabbing it
@@ -557,18 +610,31 @@ def cmd_extrinsics_wrist(cfg: Config, args) -> int:
                                 tools.append(T)
                                 boards.append(Tcb)
                                 kept.append({"T_base_tool": T.tolist(), "T_cam_board": Tcb.tolist(), "board_px": err})
+                                (session / "samples.json").write_text(json.dumps(kept, indent=2))  # as it goes: poses cannot be taken again from the pictures
                                 status = "captured"
-                                say(f"{n + 1}")
+                                if args.guide:
+                                    say("Aufgenommen.", GUIDE_VOICE) if n + 1 >= args.count else guide(n + 1, args.count, True)
+                                else:
+                                    say(f"{n + 1}")
                                 last_hint = time.monotonic()
             shown = calib.draw_corners(img, c, board.cols, board.rows)
             preview.show(banner(shown, [f"{args.cam}: {len(tools)}/{args.count} poses", status]))
     finally:
         preview.close()
         if not args.keep_torque:
-            input("\nHold the arm: torque comes back on where it is now. Press Enter ... ")
-            daemon.torque(True)
+            if confirm("\nHold the arm: torque comes back on where it is now. Press Enter ... "):
+                daemon.torque(True)
+            else:
+                print("no terminal to confirm on: the arm stays limp")
 
     (session / "samples.json").write_text(json.dumps(kept, indent=2))
+    return solve_wrist(cfg, args, model, board, tools, boards)
+
+
+def solve_wrist(cfg: Config, args, model, board: calib.Chessboard, tools: list, boards: list) -> int:
+    boards, turned = calib.unflip_boards(tools, boards, board)
+    if turned:
+        print(f"samples {turned} saw the board the other way up (it looks the same turned half round): turned back")
     res = calib.solve_hand_eye(tools, boards)
     X = res.T_tool_cam
     print(f"\nwrist camera in the tool frame ({res.method}): t = [{X[0, 3] * 1000:+.1f}, {X[1, 3] * 1000:+.1f}, {X[2, 3] * 1000:+.1f}] mm")
@@ -576,8 +642,8 @@ def cmd_extrinsics_wrist(cfg: Config, args) -> int:
           f"mean {np.mean(res.spread_deg):.2f} deg")
     bz = res.T_base_board[2, 3]
     print(f"board found at z={bz * 1000:+.1f} mm (table_z {cfg.table_z * 1000:+.1f} mm; the board's own thickness adds a few mm)")
-    if np.mean(res.spread_mm) > 8:
-        print("spread above 8 mm, NOT saving. Usual causes: the board moved, too little rotation between poses, lens not calibrated.")
+    if np.mean(res.spread_mm) > args.max_spread_mm:
+        print(f"spread above {args.max_spread_mm:g} mm, NOT saving. Usual causes: the board moved, too little rotation between poses, lens not calibrated.")
         return 1
     path = cfg.data_dir / f"camera_{args.cam}.json"
     model = vision.CameraModel.load(path)
@@ -587,6 +653,11 @@ def cmd_extrinsics_wrist(cfg: Config, args) -> int:
     model.calibrated = True
     model.save(path)
     print(f"saved camera mounting to {path.relative_to(REPO_ROOT)}")
+    workspace = getattr(cfg, "workspace_dir", None)  # the agent workspace, where there is one, reads its own copy
+    if args.cam == "wrist" and workspace is not None and (workspace / "robot_config").is_dir():
+        copy = workspace / "robot_config" / "camera_wrist.json"
+        model.save(copy)
+        print(f"and to {copy.relative_to(REPO_ROOT)}")
     return 0
 
 
@@ -646,6 +717,9 @@ def main() -> int:
     e.add_argument("--square-mm", type=float, default=25.0, help="chessboard square size in mm (handeye)")
     e.add_argument("--count", type=int, default=15, help="poses to capture (handeye)")
     e.add_argument("--min-deg", type=float, default=8.0, help="min rotation between poses (handeye)")
+    e.add_argument("--from-dir", help="solve again from the samples.json of an earlier run (handeye)")
+    e.add_argument("--max-spread-mm", type=float, default=8.0, help="do not save above this mean spread of the board position (handeye)")
+    e.add_argument("--guide", action="store_true", help="say which pose to take next, in German (handeye)")
     e.add_argument("--keep-torque", action="store_true", help="do not go limp; move the arm by other means (handeye)")
     e.add_argument("--port", type=int, default=8790, help="live view port (handeye)")
 
