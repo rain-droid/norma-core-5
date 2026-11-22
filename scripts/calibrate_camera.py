@@ -653,8 +653,9 @@ def solve_wrist(cfg: Config, args, model, board: calib.Chessboard, tools: list, 
     model.calibrated = True
     model.save(path)
     print(f"saved camera mounting to {path.relative_to(REPO_ROOT)}")
-    if args.cam == "wrist":  # the agent workspace reads its own copy (workspace/tools/util/capture.py)
-        copy = cfg.workspace_dir / "robot_config" / "camera_wrist.json"
+    workspace = getattr(cfg, "workspace_dir", None)  # the agent workspace, where there is one, reads its own copy
+    if args.cam == "wrist" and workspace is not None and (workspace / "robot_config").is_dir():
+        copy = workspace / "robot_config" / "camera_wrist.json"
         model.save(copy)
         print(f"and to {copy.relative_to(REPO_ROOT)}")
     return 0
