@@ -107,7 +107,7 @@ the harness. We used the two approaches; see [the SO-101 with a decision model](
 
 ```mermaid
 flowchart LR
-    D["World model<br/>Dream-1 API"] -->|"success rate too low"| H["Code-as-policy harness<br/>ElRobot"]
+    D["Dream-1 API<br/>vision to gripper position"] -->|"positions off on both arms"| H["Code-as-policy harness<br/>ElRobot"]
     H -->|"same Station API"| S["Same harness<br/>on the SO-101"]
     S --> T["Two arms,<br/>one workspace"]
     T --> O["Hand-over, computed and<br/>from one demonstration"]
@@ -116,7 +116,7 @@ flowchart LR
 
 | Approach | What decides the motion | Result | Evidence |
 |---|---|---|---|
-| Dream-1 world model API (DreamLabs) | the world model | The success rate was too low for our tasks. We stopped. | team report; no measurements in this repository |
+| Dream-1 API (DreamLabs), used as vision to gripper position | the Dream-1 model gives the gripper position from the camera | The positions were off on both the ElRobot and the SO-101. We stopped. | team report; no measurements in this repository |
 | Code-as-policy harness for the ElRobot | Python tools that the agent writes and runs | Pick, place, track and recover on the real arm | `docs/FEATURES.md`, tests |
 | Decision model for the SO-101 (`autopilot` branch) | an OpenAI model, 1 to 3 decisions each second | It needs no camera-to-robot calibration step. Speed and cost: see the section below. | code on the `autopilot` branch; speed and cost are a team report |
 | The harness with the SO-101 as a second arm | Python tools, as for the ElRobot | The SO-101 runs on the same NormaCore Station | `scripts/second_arm_up.sh`, `docs/SECOND_ARM.md` |
@@ -381,7 +381,7 @@ must use the same commands each time, and for corrections that must stay.
 
 | What | Why | State |
 |---|---|---|
-| Dream-1 world model API | The success rate was too low. | stopped |
+| Dream-1 API, vision to gripper position | The positions were off on both the ElRobot and the SO-101. | stopped |
 | Safe mode and collaboration mode | They decreased the reach and the speed too much. | removed after one morning |
 | Hand-over of the pink foam block | The fingers of the ElRobot cover the block. The SO-101 has nothing to hold. | not possible with these fingers |
 | Stacking by the SO-101 | Its position at the table is 2.5 to 4.5 cm wrong. The calibration was in the air. | open; a calibration at the table is necessary |
@@ -418,7 +418,7 @@ must use the same commands each time, and for corrections that must stay.
 | Robot arms | NormaCore ElRobot (7 joints), SO-ARM101 (5 joints), the NormaCore parallel gripper on each |
 | Servos and bus | Feetech ST3215 at 7.5 V and 12 V, NormaCore Station |
 | Agents | Claude Code, Codex, pi; Claude Agent SDK for the chat and voice agent |
-| Models that we tested | Claude, an OpenAI decision model, the Dream-1 world model API |
+| Models that we tested | Claude, an OpenAI decision model, the Dream-1 API (vision to gripper position) |
 | Kinematics | Pinocchio and Pink (inverse kinematics), DAQP (solver), URDF models of the two arms |
 | Collision model | capsules for each arm part, a height map for objects (our code) |
 | Vision | OpenCV, AprilTag markers (25h9), SAM 3 for segmentation, colour segmentation, an object tracker |
