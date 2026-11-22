@@ -1,6 +1,6 @@
 # Video script, about 3 minutes
 
-Read one block for each slide. About 430 words.
+Read one block for each slide. About 482 words.
 
 Slide 1
 Hi, we built a harness that lets any coding agent, Claude Code, Codex or pi, operate a real robot arm. The idea is simple: the robot only understands joint angles, so that is the only contract.
