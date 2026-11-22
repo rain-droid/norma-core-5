@@ -103,3 +103,34 @@ on its behalf, but it only knows about the arm and the table, not about objects 
   the colour of the table, or anything outside the area the top camera searches.
 - When you learn something about this arm or this table that the next session should know,
   write it into the relevant skill or tool docstring.
+
+## Accuracy falls off with reach
+
+Measured on 2026-11-22 while calibrating the wrist camera (arm limp, moved by hand, a chessboard
+lying on the mat, 49 poses in three runs):
+
+| Board's distance from the base | Height the arm and wrist camera gave it | True height |
+|---|---|---|
+| about 21 cm | 14 mm | about 13 mm (mat 10 mm plus the board) |
+| about 34 cm | 31 to 37 mm | about 13 mm |
+
+So close to the base the arm's idea of where its tool is agrees with the table, and at full
+stretch it is 2 to 2.5 cm off, in height. The error grows with how far the arm is stretched
+out, which is what a zero offset of a few degrees in the shoulder or elbow does, or play in
+the gears; which of the two has not been found out, and it has only been measured on the limp
+arm, not while the servos hold it.
+
+What follows from it:
+
+- It is a bias, not noise: the same place gives the same error. Averaging more measurements
+  does not remove it, and a spread (a Gaussian) around a measurement describes it badly. What
+  removes it is a correction that depends on reach, or calibrating the joints
+  (`scripts/calibrate.py --manual` in the main repository). Until one of those is done, plan
+  for it: about 1 cm of error within 25 cm of the base, 2 cm and more beyond 30 cm.
+- Where it matters, work close in. Put down and pick up within about 25 cm when the task
+  leaves the choice, and check with the top camera after anything done further out.
+- The wrist camera's mounting (`robot_config/camera_wrist.json`) is fitted through these same
+  arm poses and carries the same error: positions from it are good to about 1 cm close in and
+  worse at reach, mostly in height. It is good enough to see whether something is in the jaws.
+  It is not yet good enough to correct a grasp, so `refine: true` stays off far out.
+- The top camera does not go through the arm: it stays the one to measure positions with.
