@@ -65,6 +65,25 @@ class Config:
     stall_time: float = 0.45
     stale_state_s: float = 0.4
 
+    # --- working next to people (collaboration mode; docs/DECISIONS.md says what it is and is not)
+    collab: bool = False  # on at start; POST /api/collab switches it while running
+    collab_torque_limit: int = 650  # arm torque limit (0..1000) while it is on: how hard the arm can push
+    collab_speed: float = 0.6  # motions run at no more than this fraction of their planned speed
+    # A touch shows as a joint's load, or its lag behind the command, stepping away from its own
+    # recent level. Gravity and the move itself change both slowly; a hand or an obstacle, at once.
+    # Measured on this arm (2026-11-22, twelve free moves): at the speed this mode allows, a move's own
+    # steps lasting four ticks stay under 141 load units and 0.05 rad; at full speed they reach 150 and 0.09.
+    collab_load_rise: float = 220.0  # servo load units (0.1 % of stall torque)
+    collab_lag_rise: float = 0.08  # rad: about 160 load units on these servos, a few hundred grams at the gripper
+    collab_backoff_s: float = 0.5  # how much of the path already travelled the arm retreats along after a touch
+
+    # --- leading the arm by hand (POST /api/guide). The servos are soft (proportional only), so a
+    # hand displaces a joint from where it is told to be; the command then follows the hand.
+    guide_deadband: float = 0.045  # rad a joint must be pushed off its resting error before the command follows
+    guide_gain: float = 6.0  # 1/s: how fast the command follows what is beyond the deadband
+    guide_max_speed: float = 0.9  # rad/s
+    guide_idle_s: float = 3.0  # left alone this long after having been moved, the guiding ends
+
     # --- gripper
     gripper_speed: int = 1500  # ticks/s
     gripper_torque_limit: int = 500  # 0..1000

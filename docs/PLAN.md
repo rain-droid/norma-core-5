@@ -46,14 +46,18 @@ remains" first, then drawing on real paper (requirement 1 still holds with sort 
       cameras); the agent names each ("blue cube", "rubber ring") and the names are stored. About 1 h.
 - [x] **World model** (`state/world.json`), done with `world_model`, `grasp_object`, `put_object`; simulator only for the motion. Was: above the tracker: name and class, height, graspable width, shape,
       relations (on, in, next to), and what was tried on each object with its outcome. About 1.5 h.
-- [ ] **Try safe mode on the real arm:** `home`, then pick and place a cube inside the straight-down area
+- [ ] **Try safe mode on the real arm:** `home` and free moves done (straight down within a degree, 0.4 to 4 mm off). Still to do: pick and place a cube inside the straight-down area
       (within 16 cm either side of the base, 12 to 24 cm in front). The objects now on the table at y > 0.26
       will be refused as too far: that is the intended behaviour, move them closer.
 - [ ] **Re-run `track_objects`, `pick_object`, `place_object` on the real arm** with the new top camera and the
       refitted `base_in_mat`. Needed for requirement 3. About 20 min.
 - [x] **`create_skill` tool** (done) and a line in `workspace/AGENTS.md` telling the agent to write a skill after a task
       it had no skill for. Requirement 4. About 30 min.
-- [ ] **`record_demo` / `replay_demo`**: torque off, a person moves the arm, joint angles and jaw are recorded;
+- [ ] **Push the real arm in collaboration mode, and lead it by hand** (`collaboration`, `hand_guide`, `replay_demo`
+  are written and pass in the simulator; free moves on the real arm give no false stop). Needs a person at the arm:
+  switch "Collaboration on" in the web UI, send a move, push the arm lightly against it, expect `contact:`.
+  Then `hand_guide` and lead the gripper; if it is too stiff or creeps, change `guide_deadband` / `guide_gain` in `config.yaml`.
+- [x] **`record_demo` / `replay_demo`** became `hand_guide` + `replay_demo`, with the motors left on (see DECISIONS). Was:: torque off, a person moves the arm, joint angles and jaw are recorded;
       replay as joint commands. Requirement 6. About 1.5 h.
 - [ ] **Record the zero-shot runs** (requirement 2): cube onto the pink box, push to a corner, wave.
 - [ ] **Record the failure-recovery runs** (requirement 3): cube taken away mid-reach; cube nudged.

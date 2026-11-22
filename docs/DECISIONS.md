@@ -6,6 +6,26 @@ from commit messages, `CLAUDE.md` and `workspace/AGENTS.md`, not witnessed.
 
 ## 2026-11-22
 
+**Hand-guiding keeps the motors on.** The usual way to teach a hobby arm by hand is to switch torque off and
+record while a person carries it; on this arm that drops the gripper onto whatever is under it the moment the
+person lets go. The Station leaves the servos on a soft proportional gain, so a hand already displaces a joint
+by a few degrees: the daemon moves the command after the displacement (an admittance loop at 50 Hz) and the arm
+goes where it is led and holds when released. The joint's slow error, which is gravity, is tracked and
+subtracted so the arm does not creep; the price is that a push held still fades after a few seconds. What is
+saved is joint angles: a replay repeats the motion exactly and knows nothing about where the objects are now.
+
+**Collaboration mode is a reflex on top of position control, not impedance control.** The ST3215 servos take a
+position and hold it; they have no torque command, and at 7.5 V little torque to spare. So "compliant" here
+means three things done in the daemon, where the 50 Hz loop already reads every joint: a lower torque limit
+(how hard the arm can push before the servo gives), a speed cap, and a reflex that treats a sudden step in a
+joint's load or lag as a touch, stops, and retreats along the path it came by. A step is judged against the
+joint's own last quarter second, not a fixed level, because gravity and the move itself load the joints far
+more than a hand does, but slowly. It lives in the daemon and not in the workspace so that every tool, and
+any script the agent writes, gets it. The honest limits: the arm is felt before it yields (about 80 ms plus
+the servo's own stiffness), a false trigger stops a task that had nothing wrong with it, and guarded touch
+moves do not use it. The error kind is `contact`, separate from `blocked`, because the right answer to
+`blocked` is "again, slower" and the right answer to `contact` is "look first".
+
 **Safe mode trades reach for predictability.** With it on, the gripper only points straight down and only
 travels in straight lines, so nothing swings through the space above the table and a person can see where it
 will go. It is enforced where every tool ends, in `Arm.joints` (`util/arm.py`): a single target is replaced by

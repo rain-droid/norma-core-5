@@ -78,6 +78,8 @@ export interface RobotState {
   connected: boolean;
   calibrated: boolean;
   torque: boolean;
+  /** Collaboration mode: softer, slower, backs off when touched. Absent on an older daemon. */
+  collab?: boolean;
   busy: boolean;
   activity: string;
   source: Source | null;

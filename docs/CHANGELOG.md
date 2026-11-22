@@ -5,6 +5,41 @@ today is in `docs/FEATURES.md`. Add an entry with each push.
 
 ## 2026-11-22
 
+### Hand-guiding: lead the arm by hand, replay what was shown
+Modified by: Atharva Bhorpe
+
+- `POST /api/guide` (`Robot.guide` in `src/elrobot/robot.py`): the arm holds itself up, and a joint that a hand
+  pushes off its command by more than `guide_deadband` has the command follow the hand. Let go, it stays. No
+  torque is switched off, so nothing drops; joint limits and the table still stop it.
+- Workspace tools `hand_guide` (lead it, optionally set the jaws after, save the stretch under a name in
+  `state/demos/`) and `replay_demo` (the arm repeats it alone, or backwards). A pick and place taught by hand
+  in three calls is the one-shot example. `AGENTS.md` has a "Shown by hand" section.
+- Simulator tests in `tests/test_collab.py` (`SimLink.shove` holds a simulated joint off its command).
+  On the real arm it held still for eight seconds untouched (no creep); nobody has led it by hand yet, so
+  deadband and gain (`guide_*` in `config.yaml`) are untuned.
+
+### Collaboration mode: softer, slower, backs off when touched
+Modified by: Atharva Bhorpe
+
+- A switch in the web UI's header ("Collaboration on/off"), `POST /api/collab`, `collab: true` in `config.yaml`,
+  and a workspace tool (`tools/collaboration.py`) so the agent can switch it on when asked to work with someone.
+- While it is on: the arm servos' torque limit drops (`collab_torque_limit`, 650 of 1000 against 800), motions
+  run at no more than `collab_speed` (0.6) of their planned speed, and a reflex in the daemon's control loop
+  (`Reflex` in `src/elrobot/robot.py`) compares each joint's load and lag with its own level over the last
+  quarter second. A step away from it for four control ticks is a touch: the arm stops, retreats half a second
+  along the path it came by, holds, and the command ends with `kind: "contact"`. The workspace does not retry it.
+- It is not impedance control and not a safety function: these servos take position commands, so the arm is
+  felt before it yields. Guarded touch moves (grasp, pen down) keep their own contact detection.
+- Simulator tests in `tests/test_collab.py` (the simulated servos take an injected push, `SimLink.push`).
+- Thresholds come from the real arm: `ELROBOT_TRACE=file` makes the daemon write every control tick of every
+  ordinary move (command, measurement, load), and each move logs its largest lasting step in load and lag.
+  Twelve free moves gave steps of up to 141 load units and 0.05 rad at this mode's speed; the thresholds are
+  220 and 0.08 rad. Six free moves with the mode on then ran without a false stop (peaks 142 and 0.055).
+  Not yet done: a person pushing the real arm.
+- Safe mode ran on the real arm for the first time during this: `home` and 24 `move_tcp` moves, straight down
+  within a degree, 0.4 to 4 mm from the target.
+- `config.yaml`: the two KD cameras' ids after a replug (wrist `11391:19040:5:35`, across `…:5:36`).
+
 ### Safe mode: straight down, straight lines, or not at all
 Modified by: Atharva Bhorpe
 

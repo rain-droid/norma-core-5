@@ -8,8 +8,10 @@ runs, and execution aborts if the arm is blocked or servo state goes stale.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -30,6 +32,7 @@ from .motion import Trajectory, interpolate_joint
 from .servo import ALL_IDS, ARM_IDS, GRIPPER_ID, REG_TORQUE_LIMIT, JointRange
 
 log = logging.getLogger("elrobot.robot")
+TRACE = os.environ.get("ELROBOT_TRACE")  # a file that gets one line per control tick of every ordinary move: for tuning the touch reflex
 
 
 class RobotError(Exception):
@@ -42,6 +45,58 @@ class Stopped(RobotError):
 
 class Blocked(RobotError):
     """A joint trailed its setpoint for too long: something is in the way, or the move was too heavy or fast."""
+
+
+class Contact(RobotError):
+    """Something touched the arm, or the arm something, in collaboration mode: it stopped and backed off."""
+
+
+class Reflex:
+    """Notices a touch during an ordinary move, for collaboration mode.
+
+    Each joint's load and lag are compared with their own running average over the last quarter
+    second. What the move itself and gravity do to them changes slowly and the average follows;
+    a push steps away from it. The first and last moments of a move, when the arm speeds up and
+    slows down, are left out.
+    """
+
+    TAU = 0.25  # s, the memory of the running average
+    QUIET = 0.25  # s at the start of the move that are not judged
+    CONFIRM = 4  # consecutive control ticks (80 ms at 50 Hz)
+
+    def __init__(self, load_rise: float, lag_rise: float) -> None:
+        self.load_rise, self.lag_rise = load_rise, lag_rise
+        self._load: np.ndarray | None = None
+        self._lag: np.ndarray | None = None
+        self._t0 = time.monotonic()
+        self._last = self._t0
+        self._hits = 0
+        # the largest steps that lasted CONFIRM ticks in the judged part of the move: what to set the thresholds against
+        self.peak_load, self.peak_lag = 0.0, 0.0
+        self._recent: list[tuple[float, float]] = []
+
+    def update(self, load: np.ndarray, lag: np.ndarray, ending: bool) -> str | None:
+        now = time.monotonic()
+        if self._load is None:
+            self._load, self._lag = load.copy(), lag.copy()
+        d_load, d_lag = np.abs(load - self._load), np.abs(lag - self._lag)
+        k = min(1.0, (now - self._last) / self.TAU)
+        self._load += k * (load - self._load)
+        self._lag += k * (lag - self._lag)
+        self._last = now
+        if now - self._t0 < self.QUIET or ending:
+            self._hits = 0
+            self._recent.clear()
+            return None
+        self._recent = (self._recent + [(float(d_load.max()), float(d_lag.max()))])[-self.CONFIRM :]
+        if len(self._recent) == self.CONFIRM:
+            self.peak_load = max(self.peak_load, min(a for a, _ in self._recent))
+            self.peak_lag = max(self.peak_lag, min(b for _, b in self._recent))
+        self._hits = self._hits + 1 if (d_load.max() > self.load_rise or d_lag.max() > self.lag_rise) else 0
+        if self._hits >= self.CONFIRM:
+            j = int(np.argmax(d_load / self.load_rise + d_lag / self.lag_rise)) + 1
+            return f"joint {j} (load {d_load[j - 1]:+.0f}, lag {math.degrees(d_lag[j - 1]):+.1f} deg against its recent level)"
+        return None
 
 
 @dataclass
@@ -113,6 +168,7 @@ class Robot:
 
         self._motion = asyncio.Lock()
         self._stop_evt = asyncio.Event()
+        self.collab = bool(cfg.collab)  # collaboration mode: softer, slower, and it backs off when touched
         self._pace = 1.0  # fraction of the planned speed that motions run at, while _pace_until lies ahead
         self._pace_until = 0.0
         self._cmd_q: np.ndarray | None = None  # last desired arm angles
@@ -206,6 +262,7 @@ class Robot:
             "torque": False,
             "busy": self._motion.locked(),
             "pace": self.pace,
+            "collab": self.collab,
             "activity": self.activity,
             "source": self.source,
             "joints": [],
@@ -337,6 +394,21 @@ class Robot:
         r = self.ranges()
         return {i: r[i].tick(float(q[i - 1]), margin_ticks=8) for i in ARM_IDS}
 
+    def _torque_limits(self) -> dict[int, bytes]:
+        arm = self.cfg.collab_torque_limit if self.collab else self.cfg.arm_torque_limit
+        limits = {i: int(arm).to_bytes(2, "little") for i in ARM_IDS}
+        limits[GRIPPER_ID] = int(self.cfg.gripper_torque_limit).to_bytes(2, "little")
+        return limits
+
+    async def set_collab(self, on: bool) -> bool:
+        """Collaboration mode on or off. On: the arm servos get a lower torque limit, motions run
+        slower, and a touch during a move makes the arm stop and back off (`Contact`). It makes
+        contact gentler. It is not a safety function: there is a first bump before it yields."""
+        self.collab = bool(on)
+        if self.link.connected and self.torque_on:
+            await self.link.sync_write(REG_TORQUE_LIMIT, self._torque_limits())
+        return self.collab
+
     async def enable(self) -> None:
         """Turn torque on without a jump: every servo is first told to hold where it is."""
         why = self.why_not_ready()
@@ -349,9 +421,7 @@ class Robot:
         await link.write_goals({i: link.motors[i].tick for i in ALL_IDS})
         await link.write_speed({**{i: self.cfg.servo_speed for i in ARM_IDS}, GRIPPER_ID: self.cfg.gripper_speed})
         await link.write_acc({**{i: self.cfg.servo_acc for i in ARM_IDS}, GRIPPER_ID: 0})
-        limits = {i: int(self.cfg.arm_torque_limit).to_bytes(2, "little") for i in ARM_IDS}
-        limits[GRIPPER_ID] = int(self.cfg.gripper_torque_limit).to_bytes(2, "little")
-        await link.sync_write(REG_TORQUE_LIMIT, limits)
+        await link.sync_write(REG_TORQUE_LIMIT, self._torque_limits())
         await asyncio.sleep(0.05)
         await link.set_torque(ALL_IDS, True)
         self._cmd_q = self.q()
@@ -372,7 +442,8 @@ class Robot:
     @property
     def pace(self) -> float:
         """The fraction of its planned speed a motion runs at now: 1.0 unless someone asked for less."""
-        return self._pace if time.monotonic() < self._pace_until else 1.0
+        asked = self._pace if time.monotonic() < self._pace_until else 1.0
+        return min(asked, self.cfg.collab_speed) if self.collab else asked
 
     def set_pace(self, scale: float, hold_s: float = 0.5) -> float:
         """Run motions at `scale` of their planned speed for the next `hold_s` seconds. Whoever
@@ -398,6 +469,76 @@ class Robot:
         await self.link.write_goals(self._arm_ticks(q + self._bias))
         self._cmd_q = q
 
+    async def _back_off(self, traj: Trajectory, t: float) -> None:
+        """After a touch: retreat a short way along the path already travelled, slowly, and hold."""
+        back = max(0.0, t - self.cfg.collab_backoff_s)
+        dt = 1.0 / self.cfg.control_hz
+        for s in np.linspace(t, back, max(2, int((t - back) / dt * 2))):  # at half speed
+            q = traj.sample(float(s))
+            await self.link.write_goals(self._arm_ticks(q + self._bias))
+            self._cmd_q = q
+            await asyncio.sleep(dt)
+        await self._hold_here()
+
+    async def guide(self, seconds: float = 30.0, *, allow_low: bool = True) -> dict:
+        """Let a person lead the arm by hand, and remember where they took it.
+
+        The arm holds its pose as usual. A joint pushed more than `guide_deadband` off its
+        resting error has its command follow the push, so the arm goes where the hand takes it
+        and stays there when let go. What a joint's error does slowly (gravity changing with the
+        pose) is taken as the new resting error, so the arm does not creep, and a push held
+        still fades over a few seconds. The table and joint limits still hold: the command does
+        not follow into them (`allow_low` lets the fingertips come down to the table, as a grasp needs). Ends after `seconds`, on stop, or when the arm has been moved and
+        then left alone for `guide_idle_s`. Returns the joint path travelled, start included.
+        """
+        async with self._motion:
+            await self._begin("being led by hand")
+            cfg, link = self.cfg, self.link
+            dt = 1.0 / cfg.control_hz
+            try:
+                arm = {i: int(min(cfg.arm_torque_limit, cfg.collab_torque_limit)).to_bytes(2, "little") for i in ARM_IDS}
+                await link.sync_write(REG_TORQUE_LIMIT, arm)
+                q_cmd = self._plan_start()
+                await link.write_goals(self._arm_ticks(q_cmd + self._bias))
+                self._cmd_q = q_cmd
+                await asyncio.sleep(0.2)
+                rest = self.q() - q_cmd  # each joint's error with nobody pushing: gravity
+                path, t0, last_push = [q_cmd.copy()], time.monotonic(), None
+                why = "time"
+                while time.monotonic() - t0 < seconds:
+                    now = time.monotonic()
+                    if self._stop_evt.is_set():
+                        why = "stopped"
+                        break
+                    if last_push is not None and now - last_push > cfg.guide_idle_s:
+                        why = "left alone"
+                        break
+                    if link.state_age > cfg.stale_state_s:
+                        raise RobotError(f"lost servo state for {link.state_age:.1f}s; holding position")
+                    err = self.q() - q_cmd
+                    off = err - rest
+                    pushed = np.abs(off) > cfg.guide_deadband
+                    rest += np.where(pushed, dt / 4.0, dt / 1.0) * (err - rest)
+                    if pushed.any():
+                        step = np.where(pushed, off - np.sign(off) * cfg.guide_deadband, 0.0) * cfg.guide_gain * dt
+                        q_new = self.kin.clamp(q_cmd + np.clip(step, -cfg.guide_max_speed * dt, cfg.guide_max_speed * dt))
+                        if self.check_config(q_new, allow_low=allow_low) is None:
+                            q_cmd, last_push = q_new, now
+                            await link.write_goals(self._arm_ticks(q_cmd + self._bias))
+                            self._cmd_q = q_cmd
+                            if np.max(np.abs(q_cmd - path[-1])) > 0.04:
+                                path.append(q_cmd.copy())
+                    await asyncio.sleep(dt)
+                if np.max(np.abs(q_cmd - path[-1])) > 0.005:
+                    path.append(q_cmd.copy())
+                return {"path": [[round(float(v), 4) for v in q] for q in path], "moved": len(path) > 1, "ended": why,
+                        "seconds": round(time.monotonic() - t0, 1)}  # fmt: skip
+            finally:
+                self._stop_evt.clear()
+                self.activity = "idle"
+                if link.connected and self.torque_on:
+                    await link.sync_write(REG_TORQUE_LIMIT, self._torque_limits())
+
     def _integrate_droop(self, lag: np.ndarray, gain: float, dt: float) -> None:
         cfg = self.cfg
         small = np.abs(lag) < cfg.droop_max_lag
@@ -409,6 +550,8 @@ class Robot:
         t0 = time.monotonic()
         lag_since: float | None = None
         tick_n = 0
+        # the reflex watches every ordinary move, so its peaks are logged for tuning; it only acts in collaboration mode
+        reflex = Reflex(cfg.collab_load_rise, cfg.collab_lag_rise) if guard is None else None
         t, rate, last = 0.0, self.pace, t0  # t is time along the trajectory: it runs slower than the clock while the pace is below 1
         while True:
             now = time.monotonic()
@@ -433,6 +576,17 @@ class Robot:
                 if hit:
                     await self._hold_here()
                     return MoveResult("contact", hit)
+            if reflex is not None:
+                load = np.array([link.motors[i].load for i in ARM_IDS], dtype=float)
+                if TRACE:
+                    with open(TRACE, "a") as f:
+                        f.write(json.dumps({"move": t0, "t": round(t, 4), "dur": round(traj.duration, 3), "rate": round(rate, 3),
+                                            "cmd": [round(float(v), 4) for v in q_cmd], "q": [round(float(v), 4) for v in q_meas], "load": load.tolist()}) + "\n")  # fmt: skip
+                touched = reflex.update(load, lag, ending=traj.duration - t < 0.15)
+                if touched and self.collab:
+                    await self._back_off(traj, t)
+                    raise Contact(f"contact: {touched}. The arm stopped and backed off the way it came. Someone or something touched it: "
+                                  "look before moving again, and do not repeat the move unchanged.")  # fmt: skip
             worst = float(np.max(np.abs(lag)))
             if worst > cfg.stall_error:
                 lag_since = lag_since or now
@@ -443,6 +597,9 @@ class Robot:
             else:
                 lag_since = None
             if t >= traj.duration:
+                if reflex is not None and traj.duration > 0.6:
+                    log.info("move (%s, %.1fs): largest lasting step in load %.0f of %.0f, in lag %.3f of %.3f rad",
+                             self.activity, traj.duration, reflex.peak_load, cfg.collab_load_rise, reflex.peak_lag, cfg.collab_lag_rise)  # fmt: skip
                 break
             tick_n += 1
             await asyncio.sleep(max(0.0, t0 + tick_n * dt - time.monotonic()))

@@ -24,6 +24,7 @@ export interface StatusSlice {
   connected: boolean;
   calibrated: boolean;
   torque: boolean;
+  collab: boolean;
   busy: boolean;
   activity: string;
   source: Source | null;
@@ -244,6 +245,7 @@ function onState(s: RobotState): void {
     connected: s.connected,
     calibrated: s.calibrated,
     torque: s.torque,
+    collab: Boolean(s.collab),
     busy: s.busy,
     activity: s.activity,
     source: s.source ?? null,

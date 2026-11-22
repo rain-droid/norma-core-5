@@ -241,6 +241,19 @@ class Arm:
         It wears off by itself: keep calling to keep the arm slow."""
         _request("/api/pace", {"scale": scale, "hold_s": hold_s}, timeout=2.0)
 
+    def collab(self, enable: bool) -> bool:
+        """Collaboration mode on or off: softer, slower, and the arm backs off when touched
+        (the move then ends with an error starting `contact:`). See tools/collaboration.py."""
+        return bool(_request("/api/collab", {"enable": bool(enable)}, timeout=3.0)["collab"])
+
+    def guide(self, seconds: float = 30.0) -> dict:
+        """Let a person lead the arm by hand for up to `seconds`. Returns `path` (the joint
+        waypoints it was taken through, start included), `moved` and why it `ended`."""
+        res = _request("/api/guide", {"seconds": seconds, "source": self.source}, timeout=seconds + 15.0)
+        if not res.get("ok"):
+            raise RobotError(res.get("error", "hand-guiding failed"))
+        return res
+
     def emit(self, kind: str, **fields) -> None:
         """Show something in the web UI (timeline entries, markers, detections). Display only."""
         try:

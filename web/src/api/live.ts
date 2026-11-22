@@ -134,6 +134,10 @@ export class LiveTransport implements Transport {
     await post('/api/torque', { enable });
   }
 
+  async collab(enable: boolean): Promise<void> {
+    await post('/api/collab', { enable });
+  }
+
   chat(text: string): Promise<ChatResult> {
     return post<ChatResult>('/api/chat', { text });
   }

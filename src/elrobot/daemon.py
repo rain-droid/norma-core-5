@@ -29,7 +29,7 @@ from .config import Config
 from .kinematics import Kinematics
 from .link import Link, SimLink, StationLink
 from .motion import interpolate_joint
-from .robot import Blocked, Robot, RobotError, Stopped
+from .robot import Blocked, Contact, Robot, RobotError, Stopped
 from .skills import GESTURES, Skills
 from .workspace import Workspace, write_json
 
@@ -220,6 +220,8 @@ class Hub:
                     await (robot.grasp() if gripper <= 0.0 else robot.set_gripper(gripper, label=label))
             except Stopped:
                 return done("stopped before it finished; the arm is holding position", "stopped")
+            except Contact as e:
+                return done(str(e), "contact")  # collaboration mode: touched, backed off; never retried unchanged
             except Blocked as e:
                 return done(str(e), "blocked")  # the one refusal a caller may answer by trying again, slower
             except RobotError as e:
@@ -441,6 +443,34 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         except (KeyError, TypeError, ValueError):
             raise HTTPException(400, 'body must be {"scale": 0.05..1, "hold_s": seconds}') from None
         return {"ok": True, "pace": scale}
+
+    @app.post("/api/guide")
+    async def guide(request: Request):
+        """Lead the arm by hand for up to `seconds`; answers with the joint path it was taken along (docs/API.md)."""
+        body = await request.json()
+        try:
+            seconds = min(120.0, max(1.0, float(body.get("seconds", 30.0))))
+        except (TypeError, ValueError, AttributeError):
+            raise HTTPException(400, 'body must be {"seconds": 1..120}') from None
+        if hub._task_lock.locked():
+            return {"ok": False, "error": f"busy: the arm is in the middle of '{hub.robot.activity}'. Wait, or stop it first.", "kind": "busy"}
+        async with hub._task_lock:
+            hub.robot.source = str(body.get("source") or "agent")
+            hub.emit("log", level="info", text="hand-guiding: push the arm where it should go; it stays where you leave it")
+            try:
+                return {"ok": True, **(await hub.robot.guide(seconds, allow_low=bool(body.get("allow_low", True))))}
+            except RobotError as e:
+                return {"ok": False, "error": str(e), "kind": "robot"}
+            finally:
+                hub.robot.source = None
+
+    @app.post("/api/collab")
+    async def collab(request: Request):
+        """Collaboration mode on or off (docs/API.md): softer, slower, backs off when touched."""
+        body = await request.json()
+        on = await hub.robot.set_collab(bool(body.get("enable")))
+        hub.emit("log", level="info", text="collaboration mode on: softer, slower, backs off when touched" if on else "collaboration mode off")
+        return {"ok": True, "collab": on}
 
     @app.post("/api/torque")
     async def torque(request: Request):

@@ -26,6 +26,8 @@ export interface Transport {
   stop(): Promise<void>;
   interrupt(): Promise<void>;
   torque(enable: boolean): Promise<void>;
+  /** Collaboration mode on or off: softer, slower, backs off when touched. */
+  collab(enable: boolean): Promise<void>;
   chat(text: string): Promise<ChatResult>;
   utterance(audio: Blob): Promise<UtteranceResult>;
   camera(name: string): CameraSource;

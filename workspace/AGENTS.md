@@ -55,6 +55,8 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Chess on a physical board | `chess_setup`, `chess_see`, `chess_move`, `chess_record` | `chess_move`; `chess_setup` and `chess_see` turn the arm aside |
 | Drawing with a pen | `draw_plan`, `draw_pen`, `draw_run` | `draw_pen`, `draw_run` |
 | Poses and safety | `home`, `rest`, `stop` | `stop` always works |
+| Working next to a person | `collaboration` | no: it changes how the arm moves and yields |
+| Shown by hand, then repeated | `hand_guide`, `replay_demo` | `hand_guide`: the person moves it; `replay_demo` yes |
 | Skills | `activate_skill`, `deactivate_skill`, `create_skill` | no |
 | Telling the people watching what comes next | `show_steps` | no |
 
@@ -82,6 +84,27 @@ with an object when it is moved. After that, work by name: `grasp_object` "the r
 `put_object` on "the pink box", `world_model` to read what is where and what was done with it.
 `grasp_object` looks again before it reaches, grips a ring by its rim, and has the wrist camera
 check the grasp. When the person talks about a thing, use their word for it as its name.
+
+## Collaboration mode
+
+When a person will have their hands near the arm ("work with me", "hand it to me", "I'll hold
+the paper"), switch it on first: `tools/collaboration.py '{"enable": true}'`. The arm then pushes
+less hard, moves slower, and when something touches it during a move it stops, backs off the way
+it came and the command ends with `contact: joint N ...`. That is a person or an obstacle, not
+a fault: look, say what happened, and wait or choose another way. Never repeat the move
+unchanged and never switch the mode off to get past a contact. It is gentler, not safe: say so
+if someone asks whether they can put their face near it.
+
+## Shown by hand
+
+"Let me show you", "put it here" with a hand on the arm, "do what I just did": use
+`tools/hand_guide.py`. The person leads the gripper; the arm follows the push and stays where
+it is left. Say when to start and that letting go for three seconds ends it. With `save_as`
+the stretch is kept as a demonstration and `then_gripper` closes or opens the jaws at its end,
+so a pick and place is taught in three or four calls and `tools/replay_demo.py` repeats it
+without help. A demonstration repeats joint angles, not the intention: before replaying, check
+that the objects are where they were, and afterwards check with a camera that it did what was
+meant. When a taught motion is worth keeping, write a skill around it (`create_skill`).
 
 ## Safe mode
 
