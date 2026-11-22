@@ -20,8 +20,10 @@ Each pass through that counts as one of `attempts`. `tried` in the result says w
 An object out of sight behind the arm sends the arm home once to uncover it.
 
 `grasp_height` is the tool point's height above whatever the object stands on; left out, it is
-half the object's measured height, between 13 and 18 mm. An object lying on another one
-(`on` in its track) is picked from on top of it.
+half the object's measured height, between 22 and 30 mm. The fingertips reach 12 mm below the
+tool point and the arm sags a few millimetres when stretched, so lower than that they dig
+into the mat. Give it yourself, lower, only for something flatter than about 15 mm. An object
+lying on another one (`on` in its track) is picked from on top of it.
 
 Errors: the object's name is unknown (the names there are get listed), it cannot be reached,
 or it could not be picked in `attempts` passes, with what happened in each. As with pick_at,
@@ -70,7 +72,7 @@ def pick_object(ctx, object: str, grasp_height: float | None = None, attempts: i
                 return {"holding": True, "object": object, "tried": tried, "tcp": res["tcp"]}
             t, aim = aim or tracker.wait_for(ctx, object), None
             target = np.array([t["x"], t["y"], plan.table_z])
-            own = grasp_height if grasp_height is not None else float(np.clip((t["height_mm"] or 36) / 2000, 0.013, 0.018))
+            own = grasp_height if grasp_height is not None else float(np.clip((t["height_mm"] or 44) / 2000, 0.022, 0.030))
             a, pitch, q_hover, _, grasp = approach(plan, target, t["z_mm"] / 1000 + own, t["yaw_deg"], tried)
             down = plan.line(q_hover, grasp, approach=a, allow_low=True)
             ctx.emit("markers", markers=[{"id": "target", "label": f"pick {object}", "pos": target.tolist(), "color": "#3ddc84", "radius": 0.014}])

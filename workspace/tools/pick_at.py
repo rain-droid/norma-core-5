@@ -16,9 +16,11 @@ in; along the finger pads it stays wherever x, y put it.
 
 `yaw_deg` rotates the jaws about the vertical, in degrees; 0 closes left-right. Pass the
 `yaw_deg` find_objects reported so the jaws close across a flat side. The jaws open 53 mm.
-`grasp_height` is where the tool point ends up above the table: about half the object's height,
-never less than 0.013 (the fingertips are 12 mm beyond the tool point). Beyond about 27 cm the gripper has to lean, and leaning jaws that are
-also turned (`yaw_deg` not 0) dip one fingertip towards the table: such a grasp needs 0.020 or more.
+`grasp_height` is where the tool point ends up above the table: about half the object's height.
+The fingertips are 12 mm beyond the tool point and the stretched arm sags a few millimetres, so
+below about 0.020 they press into the mat; never less than 0.013. Beyond about 27 cm the
+gripper has to lean, and leaning jaws that are also turned (`yaw_deg` not 0) dip one fingertip
+towards the table.
 
 `refine: true` adds a look through the wrist camera from the hover point and shifts x, y onto
 the outline nearest to where the target should appear (at most 5 cm, twice). Only use it once
@@ -55,7 +57,7 @@ def refine_target(ctx, target: np.ndarray, max_shift: float = 0.05) -> np.ndarra
     return np.array([p[0], p[1], target[2]])
 
 
-def pick_at(ctx, x: float, y: float, yaw_deg: float | None = None, grasp_height: float = 0.018, refine: bool = False) -> dict:
+def pick_at(ctx, x: float, y: float, yaw_deg: float | None = None, grasp_height: float = 0.022, refine: bool = False) -> dict:
     arm, plan = ctx.arm, ctx.plan
     if require_ready(ctx, awake=True)["gripper"]["holding"]:
         raise RobotError("already holding something; place it first")

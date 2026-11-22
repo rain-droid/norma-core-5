@@ -11,9 +11,9 @@ What this adds:
 * if the tracker stops the arm because something moved on the table (a hand, most likely), it
   waits for quiet and carries on;
 * afterwards it waits for the top camera to see the object again (sending the arm home if the
-  arm is in the way) and compares. On the table, it must lie within 25 mm of x, y. On another
-  object, it must not be lying anywhere else, and the pile must look bigger than what was
-  underneath did alone;
+  arm is in the way) and compares. On the table, it must lie within 40 mm of x, y. On another
+  object, it must not be lying anywhere else, and the pile must look taller or bigger than
+  what was underneath did alone;
 * if that check fails and the object is in view, it is picked up and placed again, `retries`
   times (default 1).
 
@@ -36,7 +36,7 @@ from util import tracker
 from util.arm import RobotError
 from util.motion import require_ready, tcp_report
 
-NEAR_ENOUGH = 0.025  # metres from x, y that still counts as placed there
+NEAR_ENOUGH = 0.04  # metres from x, y that still counts as placed there: the real arm puts down 1 to 4 cm off, and the camera measures to about 1
 
 
 def settle(ctx, name: str) -> tuple[dict, dict]:
@@ -83,7 +83,7 @@ def place_object(ctx, object: str = "", on: str = "", x: float | None = None, y:
                 base = tracker.wait_for(ctx, on)
                 if z is None and not base["height_mm"]:
                     raise RobotError(f"the height of {on} could not be measured: give `z`, its height in metres")
-                target, surface, under = np.array([base["x"], base["y"]]), (z if z is not None else base["height_mm"] / 1000), base["area_px"]
+                target, surface, under = np.array([base["x"], base["y"]]), (z if z is not None else base["height_mm"] / 1000), base
             else:
                 tracker.wait_for(ctx)
                 target, surface = np.array([x, y], dtype=float), z or 0.0
@@ -118,8 +118,10 @@ def place_object(ctx, object: str = "", on: str = "", x: float | None = None, y:
     off = float(np.hypot(t["x"] - target[0], t["y"] - target[1]))
     if on:
         pile = tracker.track(data, on)
-        good = t["on"] == on and pile["state"] == "visible" and pile["area_px"] > 1.2 * under
-        problem = f"{mine} is not on {on}: " + (f"it lies at x={t['x']:+.3f} y={t['y']:+.3f}" if t["on"] != on else f"{on} looks no bigger than before, so it may have fallen out of view")
+        # a pile stands taller in the image than its base did; one whose top object is small can be no larger in area
+        grew = pile["box"][1] < under["box"][1] - 6 or pile["area_px"] > 1.2 * under["area_px"]
+        good = t["on"] == on and pile["state"] == "visible" and grew
+        problem = f"{mine} is not on {on}: " + (f"it lies at x={t['x']:+.3f} y={t['y']:+.3f}" if t["on"] != on else f"{on} looks no taller than before, so it may have fallen out of view")
     else:
         good = t["state"] == "visible" and off < NEAR_ENOUGH
         problem = f"{mine} ended up {off * 1000:.0f} mm from where it was meant to go, at x={t['x']:+.3f} y={t['y']:+.3f}" if t["state"] == "visible" else f"{mine} is {t['state']} after being put down"

@@ -129,6 +129,14 @@ class Watcher:
             hide |= disc > 0
         blobs, area, covered = self.find.table_blobs(self.ctx, self.cam, img, {"table_z": self.table_z, "joints_rad": q}, hide)
         near = cv2.dilate(covered.astype(np.uint8), np.ones((15, 15), np.uint8)) > 0  # the arm and a little around it
+        # Wider than that, around the arm and its hand, nothing counts as news: there the arm's
+        # own parts come out from behind the mask (the wrist camera's plate sticks out sideways
+        # when the wrist turns), the object in the jaws shows, and outlines change as the arm passes.
+        by_arm = cv2.dilate(covered.astype(np.uint8), np.ones((61, 61), np.uint8))
+        if tcp is not None:
+            uv = self.cam.to_pixel(tcp)
+            cv2.circle(by_arm, (int(uv[0]), int(uv[1])), int(np.linalg.norm(self.cam.to_pixel(tcp + [0.12, 0, 0]) - uv)), 1, -1)
+        self.by_arm = by_arm > 0
         # The edge of the searched area that a hand can come in over: the left, right and camera
         # sides. Not the robot's side: everything tall leans that way in this view, so the top of
         # an object standing near that edge crosses it.
@@ -168,12 +176,17 @@ class Watcher:
             cx, cy = blob.centroid
             same = next((e for e in self.edge if abs(e["cx"] - cx) < 8 and abs(e["cy"] - cy) < 8 and 0.75 < blob.area / e["area"] < 1.33), None)
             if same is None:
-                self.news.append(("something is moving at the edge of the work area", blob.area >= LARGE_PX, [round(cx), round(cy)]))
+                self._tell("something is moving at the edge of the work area", blob.area >= LARGE_PX, cx, cy)
                 self.edge.append({"cx": cx, "cy": cy, "area": blob.area, "box": list(blob.box), "looks": 1, "unseen": 0})
             else:
                 same.update(looks=same["looks"] + 1, unseen=0)
         # what has lain there for a second is remembered while the arm passes in front of it; what only passed through, for three seconds
         self.edge = [e for e in self.edge if e["unseen"] < (600 if e["looks"] >= 10 else 30)]
+
+    def _tell(self, what: str, proof: bool, u: float, v: float) -> None:
+        u, v = int(round(u)), int(round(v))
+        if not self.by_arm[min(max(v, 0), self.by_arm.shape[0] - 1), min(max(u, 0), self.by_arm.shape[1] - 1)]:
+            self.news.append((what, proof, [u, v]))
 
     def _intrusion(self, state, now, stop_on_intrusion) -> None:
         self.news_looks = self.news_looks + 1 if self.news else 0
@@ -214,7 +227,7 @@ class Watcher:
             self._name(t, d["color"])
         if elsewhere or (t["recent"] and _px(d, t) > MOVED):
             if t.get("state") == "visible" and now - t["seen_t"] < 0.35:  # it was in plain view a look ago: nothing hid it, something moved it
-                self.news.append((f"{t['id']} is being moved", True, [round(d["u"]), round(d["v"])]))
+                self._tell(f"{t['id']} is being moved", True, d["u"], d["v"])
             t["recent"].clear()
             t["moved_t"] = now
             t["moves"] += 1
@@ -275,7 +288,7 @@ class Watcher:
         for j, d in enumerate(seen):
             if j in taken_d or d["cut"]:
                 continue
-            self.news.append(("something new is on the table", False, [round(d["u"]), round(d["v"])]))
+            self._tell("something new is on the table", False, d["u"], d["v"])
             before = next((m for m in self.maybe if _px(m, d) < SAME_SPOT), None)
             d["looks"] = (before["looks"] if before else 0) + 1
             if d["looks"] < CONFIRM:
@@ -320,7 +333,7 @@ class Watcher:
     # ---- what goes out
 
     def _report(self, now: float) -> dict:
-        keys = ("id", "color", "state", "x", "y", "yaw_deg", "width_mm", "footprint_mm", "height_mm", "on", "z_mm", "moves", "pixel", "area_px")
+        keys = ("id", "color", "state", "x", "y", "yaw_deg", "width_mm", "footprint_mm", "height_mm", "on", "z_mm", "moves", "pixel", "box", "area_px")
         tracks = [{**{k: t[k] for k in keys}, "still_s": round(now - t["moved_t"], 1), "seen_s": round(now - t["seen_t"], 1)} for t in self.tracks]
         lying = [e for e in self.edge if e["looks"] >= 10 and e["unseen"] < 3]
         return {

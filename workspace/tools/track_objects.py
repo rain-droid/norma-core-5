@@ -61,7 +61,7 @@ def track_objects(ctx, action: str = "read", stop_arm_on_intrusion: bool | None 
         "intrusion": data["intrusion"],
         "stops_arm_on_intrusion": data["stops_arm_on_intrusion"],
         "holding": data["holding"],
-        "tracks": [{k: v for k, v in t.items() if k not in ("pixel", "area_px")} for t in data["tracks"]],
+        "tracks": [{k: v for k, v in t.items() if k not in ("pixel", "box", "area_px")} for t in data["tracks"]],
         "at_edge": data["at_edge"],
     }
 
