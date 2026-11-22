@@ -43,8 +43,8 @@ arm in the same vertical plane, which is why one tool position has many joint so
 
 ## Cameras
 
-`top` is fixed across the table from the robot, about 39 cm above the mat, looking back at
-the arm, so the robot's right is on the left of its image. It is the camera to measure with.
+`top` hangs about 79 cm above the mat, looking down at it from the end on the robot's left, with
+the robot at the right edge of its image: the robot's forward is image-left, its right image-up. It is the camera to measure with.
 `camera_top.json` holds its calibration, written by `tools/calibrate_top.py` from the four
 AprilTags at the mat's corners: the mapping from a pixel to the mat surface, where the camera
 stands (which extends that to points at a known height), and `base_in_mat`, where the robot's

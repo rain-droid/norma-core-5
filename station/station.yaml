@@ -17,7 +17,11 @@ drivers:
     formats:
       - format: "1280x720@30fps,420v"
       - format: "640x480@30fps,420v"
-      # Linux: the same cameras expose only MJPG
+      # Linux: the same cameras expose MJPG. 1280x720 first, so frames are the 853x480 the wrist camera
+      # was calibrated at. A camera the Station has held before refuses it (libuvc -51) until it is
+      # handed back to the kernel driver: run scripts/cameras_ready.sh before starting the Station.
+      # If frames come out 640x480, that is what happened.
+      - format: "1280x720@30fps,mjpg"
       - format: "640x480@30fps,mjpg"
     # keep 1 of every 2 frames (~15 fps) to limit disk churn in the frame queue
     frame-skip: 1

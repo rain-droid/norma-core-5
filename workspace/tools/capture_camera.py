@@ -1,8 +1,8 @@
 """Take a still from a camera and freeze it with what is needed to measure in it.
 
-Cameras: `top` is fixed across the table from the robot and sees the whole mat: use it to find
-things and to measure where they are. It faces the robot, so the robot's right is on the left
-of its image. `wrist` rides on the gripper and sees what the gripper points at (your own jaws
+Cameras: `top` hangs above the table and sees the whole mat: use it to find things and to
+measure where they are. The robot is at the right edge of its image and reaches towards the
+left, so the robot's forward is image-left and its right is image-up. `wrist` rides on the gripper and sees what the gripper points at (your own jaws
 are the black shapes at the bottom edge): use it to look closely and to check a grasp.
 
 Does not move the arm. Returns an `image_id`: pass it, with a pixel, to pixel_to_table. Pixels
