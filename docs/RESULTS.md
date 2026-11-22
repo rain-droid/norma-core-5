@@ -221,6 +221,8 @@ The full simulator suite (`uv run --with pytest pytest -q`), run once the aftern
 both real daemons running beside it: 56 passed and 1 failed in 10 min 43 s, stopping at the failure.
 The failure is `tests/test_push_t.py::test_the_t_is_pushed_onto_its_target[start0-target0]`: the push ended
 2.5 mm and 4 degrees from its target and the test's overlap measure came to 0.732 where it asks for more than
-0.75. Whether the wrist camera, now a body part in the kinematics, changed that run was not looked into. The
-files after it in the order (`test_robot_sim`, `test_second_arm`, `test_workspace`) and `test_kinematics`
-were run again by themselves; see `docs/HANDOFF.md` for the result.
+0.75. Whether the wrist camera, now a body part in the kinematics, changed that run was not looked into.
+
+The files after it in the order (`test_robot_sim`, `test_second_arm`, `test_workspace`) and `test_kinematics`
+were then run by themselves: 29 passed in 4 min 20 s. `test_vision_live`: 1 passed. So every test passes
+except that one push.

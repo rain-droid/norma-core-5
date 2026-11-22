@@ -14,9 +14,10 @@ the daemon was last restarted); the daemon's own copy of the wrist-camera collis
 at the next start); the wrist-turning step of `hand_over` for long things; `record_poses` played back in full
 by `replay_poses` (the hand-over part of it is what `hand_over` uses).
 
-**The full simulator test suite** was started twice on the afternoon of the 22nd while both real daemons were
-running and did not finish within 15 minutes the first time; see the commit message for the second. The
-workspace tests (35) and the kinematics and second-arm tests pass.
+**Tests.** Workspace tests: 35 pass. Full simulator suite, run with both real daemons beside it: everything
+passes except `tests/test_push_t.py::test_the_t_is_pushed_onto_its_target[start0-target0]`, whose overlap came
+to 0.732 where the test asks for more than 0.75 (the push itself ended 2.5 mm and 4 degrees off). Not looked
+into; the wrist camera became a body part in the kinematics the same afternoon and may or may not matter.
 
 **Next:** see "Two arms" in `docs/PLAN.md`. The first item, fitting the SO-101 at table level, unblocks the
 stacking.

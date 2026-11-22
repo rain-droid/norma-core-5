@@ -5,6 +5,18 @@ today is in `docs/FEATURES.md`. Add an entry with each push.
 
 ## 2026-11-22
 
+### Pictures and measurements; an unplugged second arm no longer stops the first
+Modified by: Atharva Bhorpe
+
+- `docs/RESULTS.md` (new) with `docs/images/two_arm/`: the web UI and twin, the three camera views, the raw
+  depth picture, height maps, which things each arm could pick, the obstacle map, the refusals in the tools'
+  own words, hand-over and stacking pictures, the numbers, and the log of every calibration, hand-over and
+  stacking call of the afternoon.
+- Fixed: with the SO-101's daemon running but the arm unplugged, the collision check read an empty joint list
+  and every joint command of the ElRobot failed with an IndexError. `second_arm.joints_now` now says the arm is
+  missing and the check goes on without it.
+- Test state recorded in `docs/HANDOFF.md`: all pass except one push-T case.
+
 ### Stacking by the second arm tried; documentation for the two-arm work
 Modified by: Atharva Bhorpe
 
