@@ -35,7 +35,7 @@ from pydantic import BaseModel
 from . import config
 from .agent import Brain, TextDelta, TextEnd, ToolEnd, ToolStart, TurnEnd
 from .stt import STT, AudioDecodeError, Transcript
-from .tts import TTS, SentenceChunker, speakable
+from .tts import TTS, SentenceChunker, speakable, detect_language
 
 log = logging.getLogger("elrobot.voice.service")
 
@@ -201,7 +201,7 @@ class VoiceService:
 
     # -- input ------------------------------------------------------------
 
-    async def handle_text(self, text: str, via: str = "text") -> str:
+    async def handle_text(self, text: str, via: str = "text", language: str | None = None) -> str:
         """Start a turn for `text` and return its id at once.
 
         A turn already running is interrupted first (barge-in). A bare stop
@@ -210,6 +210,12 @@ class VoiceService:
         text = " ".join((text or "").split())
         if not text:
             raise ValueError("text is empty")
+        # Replies are voiced in the language the person used: what speech to text heard, or what
+        # the typed words look like; a message that does not say keeps the language so far.
+        if language in config.LANGUAGES:
+            self.tts.language = language
+        else:
+            self.tts.language = detect_language(text, self.tts.language)
         turn_id = uuid.uuid4().hex[:12]
         self._emit(
             {"kind": "chat", "role": "user", "text": text, "turn_id": turn_id,
@@ -269,7 +275,7 @@ class VoiceService:
         if result is None or not result.text:
             self._refresh_state()
             return "", None
-        turn_id = await self.handle_text(result.text, via="voice")
+        turn_id = await self.handle_text(result.text, via="voice", language=result.language)
         return result.text, turn_id
 
     def _is_own_voice(self, transcript: str) -> bool:

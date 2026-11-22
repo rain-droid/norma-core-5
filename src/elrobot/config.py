@@ -20,7 +20,7 @@ class Config:
     sim: bool = False
     voice: bool = True  # start the conversational agent with the daemon
     bus_serial: str | None = None
-    # camera unique-id substring -> name. The two cameras are the same model, so they can only be
+    # camera unique-id substring -> name. The two KD cameras are the same model, so they can only be
     # told apart by the USB port they are on; `scripts/probe.py` prints the ids.
     cameras: dict[str, str] = field(default_factory=dict)
 
@@ -29,6 +29,10 @@ class Config:
     assets_dir: Path = REPO_ROOT / "assets"
     web_dist: Path = REPO_ROOT / "web/dist"
     data_dir: Path = REPO_ROOT / "data"
+    # RoboHarness-style agent workspace: tools, skills, live perception and call history as files.
+    workspace_dir: Path = REPO_ROOT / "workspace"
+    # The second arm's daemon (scripts/second_arm_up.sh), watched for the digital twin. Empty: no second arm.
+    second_arm_url: str = "http://127.0.0.1:8770"
 
     # --- workspace
     table_z: float = 0.0  # table height in the base frame (base sits on the table)
@@ -38,8 +42,10 @@ class Config:
 
     # --- motion
     control_hz: float = 50.0
-    max_joint_speed: float = 1.2  # rad/s at speed=1.0
-    max_joint_accel: float = 5.0  # rad/s^2
+    # Cruise speed and ramp acceleration of the trapezoidal profile at speed=1.0. Chosen so moves
+    # take as long as they did under the minimum-jerk profile these replaced (1.2 and 5.0 there).
+    max_joint_speed: float = 0.96  # rad/s
+    max_joint_accel: float = 3.9  # rad/s^2
     limit_margin: float = 0.06  # rad kept clear of each joint limit
     # Torque limit (0..1000) written to the arm servos when torque comes on. The Station's
     # calibration leaves it at 500, which on a 7.5 V supply is too weak to hold the arm out.
@@ -60,6 +66,13 @@ class Config:
     stall_error: float = 0.22
     stall_time: float = 0.45
     stale_state_s: float = 0.4
+
+    # --- leading the arm by hand (POST /api/guide). The servos are soft (proportional only), so a
+    # hand displaces a joint from where it is told to be; the command then follows the hand.
+    guide_deadband: float = 0.045  # rad a joint must be pushed off its resting error before the command follows
+    guide_gain: float = 6.0  # 1/s: how fast the command follows what is beyond the deadband
+    guide_max_speed: float = 0.9  # rad/s
+    guide_idle_s: float = 3.0  # left alone this long after having been moved, the guiding ends
 
     # --- gripper
     gripper_speed: int = 1500  # ticks/s

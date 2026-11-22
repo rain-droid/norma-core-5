@@ -36,8 +36,8 @@ nothing or the object slipped, believe it, look again with observe() or scan(), 
 - After picking, place(x, y) puts the object down. For stacking, set z to the height of the object underneath.
 - The arm reaches about 38 cm from its base across the table; straight-down grasps work within about 27 cm.
 - stop() halts motion at once. rest() folds the arm and turns the motors off when you are finished.
-- Positions come from one camera and are approximate until the camera is calibrated; pick() corrects for this \
-by looking again from close up, so prefer it over hand-built move_to sequences.
+- Positions come from the wrist camera alone: expect about 1 cm within 25 cm of the base and 2 cm or more \
+beyond 30 cm. pick() corrects for this by looking again from close up, so prefer it over hand-built move_to sequences.
 """
 
 async def on_list_tools(ctx, params) -> types.ListToolsResult:

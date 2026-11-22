@@ -5,7 +5,7 @@
     clip = await tts.asynthesize("...")       # same, off the event loop
 
 Providers, first usable one wins and a failing one falls through to the next:
-ElevenLabs (if ELEVENLABS_API_KEY is set) -> local Kokoro -> macOS `say`.
+ElevenLabs (if ELEVENLABS_API_KEY is set) -> local Phonon -> local Kokoro -> macOS `say`.
 Every clip is a 16-bit mono WAV under data/audio/, pruned by age and count.
 """
 
@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -23,7 +24,7 @@ import wave
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from . import config
 
@@ -245,6 +246,42 @@ def download(url: str, dest: Path, on_progress: Callable[[str], None] | None = N
         on_progress(f"downloaded {dest.name} ({dest.stat().st_size / 1e6:.0f} MB)")
 
 
+# Words that give a language away in a short spoken sentence. Not a language identifier: it only
+# has to tell the configured languages apart, and when a sentence has none of these words the
+# language of the conversation so far is kept.
+_LANGUAGE_WORDS = {
+    "en": "the a an i you it is are and not with on for my your yes no hello hi thanks please what where how pick put got "
+          "now that this to of me up i'm it's let's done here there can will do did have its one sec",  # "okay" is said in all three
+    "fr": "le la les un une des je tu il elle nous vous est sont et que qui dans pour pas sur avec ce cette mon ton oui non "
+          "bonjour salut merci c'est j'ai ça voilà prends mets où quoi au du ne suis fait bien très d'accord je l'ai "
+          "voici maintenant encore peux vais cube boîte anneau pince désolé attends regarde",
+    "de": "der die das ein eine ich du er sie wir ihr ist sind und nicht mit auf für den dem ja nein hallo danke bitte was wo "
+          "wie nimm leg stell mein dein es zu im am habe hab bin gut sehr jetzt noch mal auch schon kann würfel greifer "
+          "moment fertig hier dort kiste ring tut mir leid schau",
+}
+_LANGUAGE_WORDS = {code: set(words.split()) for code, words in _LANGUAGE_WORDS.items()}
+_LANGUAGE_LETTERS = {"de": set("äöüß"), "fr": set("éèêëàâçùûîïôœ")}
+
+
+def detect_language(text: str, default: str = "en", allowed: list[str] | None = None) -> str:
+    """Which of the configured languages a sentence is in; `default` when it does not say."""
+    allowed = allowed or config.LANGUAGES
+    if len(allowed) < 2:
+        return allowed[0] if allowed else default
+    lowered = text.lower()
+    words = re.findall(r"[a-zà-ÿœ']+", lowered)
+    scores = {}
+    for code in allowed:
+        score = sum(1.0 for w in words if w in _LANGUAGE_WORDS.get(code, ()))
+        score += 1.5 * sum(1 for ch in lowered if ch in _LANGUAGE_LETTERS.get(code, ()))
+        scores[code] = score
+    best = max(scores, key=scores.get)
+    runner_up = max((v for k, v in scores.items() if k != best), default=0.0)
+    if scores[best] >= 1.0 and scores[best] > runner_up:
+        return best
+    return default if default in allowed else allowed[0]
+
+
 class Provider:
     name = "base"
 
@@ -257,6 +294,10 @@ class Provider:
     def synthesize_to(self, text: str, path: Path) -> float:
         """Write a mono 16-bit WAV at `path`; return its duration in seconds."""
         raise NotImplementedError
+
+    def speak(self, text: str, path: Path, lang: str) -> float:
+        """As synthesize_to, in the language `lang`. A provider with one language ignores it."""
+        return self.synthesize_to(text, path)
 
 
 class ElevenLabsProvider(Provider):
@@ -361,6 +402,69 @@ class KokoroProvider(Provider):
         return len(samples) / float(sample_rate)
 
 
+class PhononProvider(Provider):
+    """Gradium's Phonon through the `ptts` runtime: a small on-device model, several times faster
+    than real time on a laptop processor. Weights come from Hugging Face on first use.
+
+    The runtime is told a language when it is loaded (it decides how numbers and dates are
+    read out), so there is one instance per language, made the first time that language is
+    spoken; they share the weights file on disk. Which model, and the licence that goes with
+    it, is in config.py."""
+
+    name = "phonon"
+
+    def __init__(self) -> None:
+        self._voices: dict[str, Any] = {}
+        self._lock = threading.Lock()
+        self._model = config.PHONON_MODEL
+
+    def available(self) -> bool:
+        try:
+            import ptts  # noqa: F401
+        except Exception:
+            return False
+        return True
+
+    def _voice(self, lang: str):
+        """(runtime, voice name) for a language; English if that language cannot be loaded."""
+        with self._lock:
+            if lang not in self._voices:
+                import ptts
+
+                try:
+                    self._voices[lang] = ptts.TTS(self._model, lang=lang, quant=config.PHONON_QUANT)
+                except Exception as exc:
+                    if self._model == config.PHONON_MODEL_EN:
+                        raise
+                    # not logged in to Hugging Face, or the licence not accepted: English only
+                    log.warning("Phonon model %s unavailable (%s); using the English model", self._model, str(exc).splitlines()[0][:160])
+                    self._model = config.PHONON_MODEL_EN
+                    self._voices.clear()
+                    self._voices["en"] = ptts.TTS(self._model, lang="en", quant=config.PHONON_QUANT)
+            if lang not in self._voices or self._model == config.PHONON_MODEL_EN:
+                lang = "en"
+                if "en" not in self._voices:
+                    import ptts
+
+                    self._voices["en"] = ptts.TTS(self._model, lang="en", quant=config.PHONON_QUANT)
+            return self._voices[lang], (config.PHONON_VOICES.get(lang) or None)
+
+    def warm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for lang, line in (("en", "Yo."), ("fr", "Salut."), ("de", "Hallo.")):
+                if lang in config.LANGUAGES:  # the first sentence in each language is the slow one
+                    self.speak(line, Path(tmp) / f"{lang}.wav", lang)
+
+    def synthesize_to(self, text: str, path: Path) -> float:
+        return self.speak(text, path, config.LANGUAGES[0])
+
+    def speak(self, text: str, path: Path, lang: str) -> float:
+        tts, voice = self._voice(lang)
+        with self._lock:  # one sentence at a time
+            tts.save(str(path), text, voice=voice)
+        return _wav_duration(path)
+
+
 class SayProvider(Provider):
     """macOS `say`, the robotic last resort that needs no model at all."""
 
@@ -378,7 +482,7 @@ class SayProvider(Provider):
 
 
 def default_providers() -> list[Provider]:
-    chain: list[Provider] = [ElevenLabsProvider(), KokoroProvider(), SayProvider()]
+    chain: list[Provider] = [ElevenLabsProvider(), PhononProvider(), KokoroProvider(), SayProvider()]
     if config.TTS_PROVIDER:
         chain = [p for p in chain if p.name == config.TTS_PROVIDER] or chain
     return chain
@@ -400,6 +504,9 @@ class TTS:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts")
         self._last_prune = 0.0
         self.active: str | None = None  # provider that produced the last clip
+        # The language of the conversation: what a sentence is taken to be in when its own words
+        # do not say. The service sets it from what the person last said or typed.
+        self.language: str = config.LANGUAGES[0]
 
     # -- lifecycle --------------------------------------------------------
 
@@ -441,7 +548,7 @@ class TTS:
         for provider in self._usable():
             started = time.perf_counter()
             try:
-                duration = provider.synthesize_to(text, path)
+                duration = provider.speak(text, path, detect_language(text, self.language))
             except Exception as exc:
                 last_error = exc
                 self._mark_broken(provider, exc)

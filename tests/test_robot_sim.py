@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+import time
 
 import numpy as np
 import pytest
@@ -65,6 +66,35 @@ def test_table_and_reach_are_enforced():
                 await robot.move_to([0.0, 0.60, 0.10])
             with pytest.raises(RobotError):
                 await robot.move_to([0.0, 0.22, -0.03], pitch=90)
+        finally:
+            await link.stop()
+
+    asyncio.run(run())
+
+
+def test_pace_slows_a_motion_under_way_and_wears_off():
+    async def run():
+        robot, link = await started()
+        try:
+            a, b = robot.q(), robot.q()
+            b[0] += 0.8
+
+            async def timed(q, slow_for: float = 0.0) -> float:
+                t0 = time.monotonic()
+                move = asyncio.create_task(robot.move_joints(q))
+                while slow_for and time.monotonic() - t0 < slow_for:
+                    assert robot.set_pace(0.25, 0.2) == 0.25
+                    await asyncio.sleep(0.05)
+                assert (await move).outcome == "done"
+                return time.monotonic() - t0
+
+            full = await timed(b)
+            slowed = await timed(a, slow_for=1.0)
+            assert slowed > full + 0.5, (full, slowed)  # a second at a quarter speed costs three quarters of one
+            assert np.max(np.abs(robot.q() - a)) < 0.02  # and it still arrives
+            await asyncio.sleep(0.3)
+            assert robot.pace == 1.0
+            assert abs(await timed(b) - full) < 0.3  # back to the speed it had
         finally:
             await link.stop()
 

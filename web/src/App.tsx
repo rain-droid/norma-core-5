@@ -9,10 +9,11 @@ import { LinkNotices } from './ui/LinkNotices.tsx';
 import { SceneView } from './ui/SceneView.tsx';
 import { SidePanel } from './ui/SidePanel.tsx';
 import { StatusStrip } from './ui/StatusStrip.tsx';
+import { StepsPanel } from './ui/StepsPanel.tsx';
 import { StopButton } from './ui/StopButton.tsx';
 import { Composer, Timeline } from './ui/Timeline.tsx';
 import { VoiceDock } from './ui/VoiceDock.tsx';
-import { GhostIcon, ViewIcon } from './ui/icons.tsx';
+import { GhostIcon, StepsIcon, ViewIcon } from './ui/icons.tsx';
 import { voice } from './voice/controller.ts';
 
 function isTextField(el: Element | null): boolean {
@@ -95,6 +96,21 @@ export function App() {
     }
   }, [ghost]);
 
+  const [steps, setSteps] = useState(() => {
+    try {
+      return localStorage.getItem('elrobot.steps') !== 'off';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('elrobot.steps', steps ? 'on' : 'off');
+    } catch {
+      /* private mode: the choice just does not persist */
+    }
+  }, [steps]);
+
   useEffect(() => {
     voice.start();
     const mock = new URLSearchParams(location.search).get('mock') === '1';
@@ -161,6 +177,16 @@ export function App() {
           <button
             type="button"
             className="chip-btn"
+            aria-pressed={steps}
+            onClick={() => setSteps((s) => !s)}
+            title="What the robot is doing right now and the steps it has planned next"
+          >
+            <StepsIcon />
+            Steps {steps ? 'on' : 'off'}
+          </button>
+          <button
+            type="button"
+            className="chip-btn"
             aria-pressed={ghost}
             onClick={() => setGhost((g) => !g)}
             title="Outline of the pose the arm is being told to reach, shown while it lags behind"
@@ -175,6 +201,7 @@ export function App() {
         </header>
 
         <div className="hud__talk" ref={talkRef}>
+          {steps && <StepsPanel />}
           <Timeline />
           <Composer />
         </div>

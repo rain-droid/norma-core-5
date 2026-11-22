@@ -1,7 +1,8 @@
 """The robot daemon: one process that owns the arm and serves docs/API.md.
 
-Clients (the MCP shim for Claude Code, the web UI, the voice agent) all go through here, so
-there is a single place that decides what the arm does and a single stream of events.
+Clients (the agent workspace's joint commands, the MCP shim, the web UI, the voice agent) all
+go through here, so there is a single place that decides what the arm does and a single stream
+of events.
 """
 
 from __future__ import annotations
@@ -16,17 +17,22 @@ import uuid
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+import numpy as np
 
 from . import tools as toolreg
 from .config import Config
 from .kinematics import Kinematics
 from .link import Link, SimLink, StationLink
-from .robot import Robot, RobotError, Stopped
+from .motion import interpolate_joint
+from .robot import Blocked, Robot, RobotError, Stopped
+from .second_arm import SecondArm
 from .skills import GESTURES, Skills
+from .workspace import Workspace, write_json
 
 log = logging.getLogger("elrobot.daemon")
 
@@ -46,6 +52,16 @@ class Hub:
         self._task_lock = asyncio.Lock()  # one motion tool at a time
         self._current_call: str | None = None
         self.voice = None
+        self.workspace = Workspace(self, cfg.workspace_dir) if cfg.workspace_dir.is_dir() else None
+        self.second = SecondArm(cfg.second_arm_url, cfg.workspace_dir) if cfg.second_arm_url and not cfg.sim else None
+        if isinstance(self.link, SimLink):
+            from .simworld import SimWorld
+
+            world = SimWorld(self.robot, self.skills.cam)
+            world.attach(self.link)
+            if self.workspace is not None:  # the simulated overhead camera's calibration, in calibrate_top's format
+                (self.workspace.root / "robot_config").mkdir(exist_ok=True)
+                write_json(self.workspace.root / "robot_config" / "camera_top.sim.json", world.calibration())
 
     def _make_link(self) -> Link:
         cfg = self.cfg
@@ -57,6 +73,13 @@ class Hub:
         return StationLink(cfg.station_host, cfg.bus_serial, cfg.cameras)
 
     # ---- events
+
+    def snapshot(self) -> dict:
+        """The robot's state, and the second arm's beside it when there is one (None while its daemon is not answering)."""
+        snap = self.robot.snapshot()
+        if self.second is not None:
+            snap["second_arm"] = self.second.snapshot()
+        return snap
 
     def emit(self, kind: str, **fields) -> dict:
         ev = {"type": "event", "id": next(self._ids), "t": time.time(), "kind": kind, **fields}
@@ -99,6 +122,8 @@ class Hub:
             "gestures": list(GESTURES),
             "cameras": sorted(self.link.cameras),
             "table_z": self.cfg.table_z,
+            # the envelope every joint command is held to, for whoever plans them
+            "clearance": {"floor": self.cfg.floor_clearance, "body": self.cfg.body_clearance, "min_y": self.cfg.min_y, "limit_margin": self.cfg.limit_margin},
         }
 
     # ---- tools
@@ -154,6 +179,108 @@ class Hub:
             log.exception("tool %s crashed", name)
             return finish(False, f"internal error in {name}: {type(e).__name__}: {e}", "internal")
 
+    # ---- joint commands: all the agent workspace can ask of the arm
+
+    async def joint_command(self, body: dict) -> dict:
+        """Carry out one joint command: waypoints of seven joint angles (rad) and/or a jaw opening.
+
+        No poses, no inverse kinematics and no named skills cross this line. What does is held
+        to the joint limits and the clearance envelope, refused while a servo reports a fault,
+        timed with the speed profile and followed under the stall guard.
+        """
+        robot = self.robot
+        source = str(body.get("source") or "agent")
+        label = str(body.get("label") or "joint command")[:48]
+        own = body.get("call_id") is None  # from the agent's own code, not from inside a workspace tool
+        call_id = str(body.get("call_id") or uuid.uuid4().hex[:10])
+        t0 = time.monotonic()
+        if own:
+            self.emit("tool_start", call_id=call_id, tool="joint_command", source=source,
+                      args={k: body[k] for k in ("path", "gripper", "speed") if body.get(k) is not None})  # fmt: skip
+
+        def done(error: str | None = None, kind: str = "robot") -> dict:
+            if own:
+                self.emit("tool_end", call_id=call_id, tool="joint_command", ok=error is None, summary=error or label,
+                          error=kind if error else None, duration_ms=int((time.monotonic() - t0) * 1000), source=source)  # fmt: skip
+            if error:
+                return {"ok": False, "error": error, "kind": kind}
+            snap = robot.snapshot()
+            return {"ok": True, "joints": [j["q"] for j in snap["joints"][:7]], "gripper": snap["gripper"], "tcp": snap["ee"]}
+
+        try:
+            path, gripper, speed = self._parse_joint_command(body)
+        except (TypeError, ValueError) as e:
+            return done(str(e), "invalid")
+        if self._task_lock.locked():
+            return done(f"busy: the arm is in the middle of '{robot.activity}'. Wait, or stop it first.", "busy")
+        async with self._task_lock:
+            self._current_call, robot.source = call_id, source
+            try:
+                faulted = [i for i, m in sorted(self.link.motors.items()) if m.status]
+                if faulted:
+                    # A servo in overload protection gives 20 % torque: the joint sags and the arm no
+                    # longer goes where it is sent. Moving on from there is how things get hit.
+                    raise RobotError(f"servo fault on joint(s) {faulted} (status 32 = overload). Do not move: a person must hold "
+                                     "the arm while torque is switched off and on again (POST /api/torque) to clear it.")  # fmt: skip
+                if path is not None:
+                    await self._follow(path, speed, bool(body.get("check", True)), bool(body.get("allow_low", False)), label)
+                if gripper is not None:
+                    # fully closed is a grasp: shut until the jaws stall, then hold just past that point
+                    await (robot.grasp() if gripper <= 0.0 else robot.set_gripper(gripper, label=label))
+            except Stopped:
+                return done("stopped before it finished; the arm is holding position", "stopped")
+            except Blocked as e:
+                return done(str(e), "blocked")  # the one refusal a caller may answer by trying again, slower
+            except RobotError as e:
+                return done(str(e))
+            finally:
+                self._current_call, robot.source, robot.activity = None, None, "idle"
+                self.emit("plan", call_id=call_id, path=[], target=None)
+                if self.workspace is not None:
+                    self.workspace.publish()  # perception/ shows the outcome at once
+        return done()
+
+    def _parse_joint_command(self, body: dict) -> tuple[np.ndarray | None, float | None, float]:
+        robot = self.robot
+        why = robot.why_not_ready()
+        if why:
+            raise ValueError(why)
+        path = body.get("path")
+        if path is not None:
+            path = np.asarray(path, dtype=float)
+            if path.ndim != 2 or path.shape[1] != 7 or not np.all(np.isfinite(path)):
+                raise ValueError("path must be a list of waypoints, each seven finite joint angles in radians (servos 1..7)")
+            lo, hi = robot.kin.lower, robot.kin.upper  # the calibrated limits (why_not_ready refreshed them)
+            out = np.argwhere((path < lo - 1e-6) | (path > hi + 1e-6))
+            if len(out):
+                k, j = (int(v) for v in out[0])
+                raise ValueError(f"waypoint {k}: joint {j + 1} at {path[k, j]:+.3f} rad is outside its limits [{lo[j]:+.3f}, {hi[j]:+.3f}]")
+        gripper = body.get("gripper")
+        if gripper is not None:
+            gripper = float(gripper)
+            if not 0.0 <= gripper <= 1.0:
+                raise ValueError("gripper is an opening fraction between 0 (closed) and 1 (open)")
+        if path is None and gripper is None:
+            raise ValueError("a joint command needs a path, a gripper opening, or both")
+        speed = float(body.get("speed", 0.8))
+        if not speed > 0:
+            raise ValueError("speed must be positive")
+        return path, gripper, speed
+
+    async def _follow(self, path: np.ndarray, speed: float, check: bool, allow_low: bool, label: str) -> None:
+        robot = self.robot
+        if len(path) == 1:
+            await robot.move_joints(path[0], speed=speed, check=check, allow_low=allow_low, label=label)
+            return
+        lead = interpolate_joint(robot._plan_start(), path[0])  # from where the arm is to the first waypoint
+        full = np.vstack([lead[:-1], path])
+        if check:
+            # as for a single target: the pose the arm starts in may be one it could not be sent to
+            why = robot.check_path(full[max(1, (len(lead) - 1) // 3) :], allow_low=allow_low)
+            if why:
+                raise RobotError(f"move rejected: {why}")
+        await robot.move_path(full, speed=speed, label=label)
+
     async def stop(self) -> None:
         await self.robot.stop()
         self.emit("log", level="warn", text="STOP: motion halted, holding position")
@@ -168,7 +295,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             await asyncio.sleep(1 / 30)
             if hub.sockets:
                 try:
-                    hub._broadcast(hub.robot.snapshot())
+                    hub._broadcast(hub.snapshot())
                 except Exception:
                     log.exception("state broadcast failed")
 
@@ -185,6 +312,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         await hub.link.start()
         tasks = [asyncio.create_task(state_loop()), asyncio.create_task(health_loop())]
+        if hub.second is not None:
+            tasks.append(asyncio.create_task(hub.second.poll_loop()))
+        if hub.workspace is not None:
+            tasks.append(asyncio.create_task(hub.workspace.publish_loop()))
         if hub.voice is not None:
             tasks.append(asyncio.create_task(_start_voice(hub)))
         yield
@@ -200,6 +331,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     app = FastAPI(title="ElRobot daemon", lifespan=lifespan)
     app.state.hub = hub
+
+    @app.middleware("http")
+    async def local_pages_only(request: Request, call_next):
+        """A web page open in a browser on this machine can POST to 127.0.0.1 from any site, and
+        that would move the arm. Browsers name the page's site in `Origin`; anything but this
+        machine is turned away. Clients that are not browsers (the workspace, the MCP shim) send none."""
+        origin = request.headers.get("origin")
+        if request.method != "GET" and origin and urlsplit(origin).hostname not in ("127.0.0.1", "localhost", "::1", cfg.host):
+            return JSONResponse({"ok": False, "error": f"requests from {origin} are not accepted"}, status_code=403)
+        return await call_next(request)
 
     # The voice agent is optional: without its package the daemon still serves everything else.
     # Its routes must be registered before the catch-all static mount at "/" below.
@@ -227,7 +368,14 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/state")
     async def state():
-        return hub.robot.snapshot()
+        return hub.snapshot()
+
+    @app.get("/api/second_arm/assets/{path:path}")
+    async def second_arm_asset(path: str):
+        found = await hub.second.asset(path) if hub.second is not None else None
+        if found is None:
+            return JSONResponse({"error": "no second arm, or it has no such file"}, status_code=404)
+        return Response(content=found[0], media_type=found[1], headers={"Cache-Control": "max-age=3600"})
 
     @app.get("/api/meta")
     async def meta():
@@ -259,6 +407,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
         return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame", headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/camera/{name}/vision")
+    async def camera_vision(name: str):
+        """What the vision sees in that camera's newest frame, for the web UI to draw (vision_live.py)."""
+        from . import vision_live
+
+        out = await asyncio.to_thread(vision_live.analyse, hub, name)
+        if out is None:
+            raise HTTPException(404, f"no frame from camera '{name}'")
+        return out
+
     @app.post("/api/tools/{name}")
     async def run_tool(name: str, request: Request):
         try:
@@ -267,10 +425,60 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             body = {}
         return JSONResponse(await hub.call_tool(name, body.get("args") or {}, body.get("source") or "api"))
 
+    @app.post("/api/joints")
+    async def joints(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body must be a JSON object")
+        return JSONResponse(await hub.joint_command(body))
+
+    @app.post("/api/event")
+    async def event(request: Request):
+        """Lets the workspace's tools show on the timeline and the 3D view. Display only."""
+        body = await request.json()
+        kind = body.pop("kind", None) if isinstance(body, dict) else None
+        if kind not in ("tool_start", "tool_end", "markers", "detections", "log", "steps", "obstacles", "plan"):
+            raise HTTPException(400, "kind must be one of tool_start, tool_end, markers, detections, log, steps, obstacles, plan")
+        hub.emit(kind, **{k: v for k, v in body.items() if k not in ("type", "id", "t")})
+        return {"ok": True}
+
     @app.post("/api/stop")
     async def stop():
         await hub.stop()
         return {"ok": True}
+
+    @app.post("/api/pace")
+    async def pace(request: Request):
+        """Slow motions down for a moment (docs/API.md). Never speeds one up beyond what it was sent with."""
+        body = await request.json()
+        try:
+            scale = hub.robot.set_pace(body["scale"], body.get("hold_s", 0.5))
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, 'body must be {"scale": 0.05..1, "hold_s": seconds}') from None
+        return {"ok": True, "pace": scale}
+
+    @app.post("/api/guide")
+    async def guide(request: Request):
+        """Lead the arm by hand for up to `seconds`; answers with the joint path it was taken along (docs/API.md)."""
+        body = await request.json()
+        try:
+            seconds = min(120.0, max(1.0, float(body.get("seconds", 30.0))))
+        except (TypeError, ValueError, AttributeError):
+            raise HTTPException(400, 'body must be {"seconds": 1..120}') from None
+        if hub._task_lock.locked():
+            return {"ok": False, "error": f"busy: the arm is in the middle of '{hub.robot.activity}'. Wait, or stop it first.", "kind": "busy"}
+        async with hub._task_lock:
+            hub.robot.source = str(body.get("source") or "agent")
+            hub.emit("log", level="info", text="hand-guiding: push the arm where it should go; it stays where you leave it")
+            try:
+                return {"ok": True, **(await hub.robot.guide(seconds, allow_low=bool(body.get("allow_low", True))))}
+            except RobotError as e:
+                return {"ok": False, "error": str(e), "kind": "robot"}
+            finally:
+                hub.robot.source = None
 
     @app.post("/api/torque")
     async def torque(request: Request):

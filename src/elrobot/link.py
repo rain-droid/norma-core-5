@@ -20,6 +20,7 @@ from .servo import (
     REG_ACC,
     REG_GOAL_POSITION,
     REG_GOAL_SPEED,
+    REG_LOCK,
     REG_TORQUE_ENABLE,
     TICKS,
     MotorState,
@@ -359,6 +360,21 @@ class StationLink(Link):
             )
         )
 
+    async def write_eeprom(self, motor_id: int, address: int, value: bytes) -> None:
+        """Store a value in one servo's EEPROM the way the Station's own calibration does:
+        unlock, buffered write, action, lock. The caller checks it took (the bus drops packets)."""
+        from .norma import st3215
+
+        steps = (
+            {"write": st3215.ST3215WriteCommand(motor_id=motor_id, address=REG_LOCK, value=b"\x00")},
+            {"reg_write": st3215.ST3215RegWriteCommand(motor_id=motor_id, address=address, value=value)},
+            {"action": st3215.ST3215ActionCommand(motor_id=motor_id)},
+            {"write": st3215.ST3215WriteCommand(motor_id=motor_id, address=REG_LOCK, value=b"\x01")},
+        )
+        for step in steps:
+            await self._send(st3215.Command(target_bus_serial=self.bus_serial, **step))
+            await asyncio.sleep(0.05)
+
     async def auto_calibrate(self) -> None:
         from .norma import st3215
 
@@ -404,6 +420,7 @@ class SimLink(Link):
         # Optional hook: (gripper_tick) -> tick the jaws stall at, or None. Lets a simulated
         # object block the gripper so grasp verification has something to detect.
         self.gripper_block: Callable[[float], float | None] | None = None
+        self.shove: dict[int, float] = {}  # servo id -> ticks a hand holds that joint away from where it is told to be
         import math
 
         for i in ALL_IDS:
@@ -440,7 +457,7 @@ class SimLink(Link):
             for i, m in self.motors.items():
                 load = 0
                 if m.torque:
-                    err = m.goal_tick - self._pos[i]
+                    err = m.goal_tick + self.shove.get(i, 0.0) - self._pos[i]
                     vmax = self._speed_limit[i]
                     # a servo's position loop is roughly proportional with a speed ceiling
                     v_des = max(-vmax, min(vmax, err * 25.0))

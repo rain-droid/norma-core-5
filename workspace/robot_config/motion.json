@@ -1,0 +1,8 @@
+{
+ "blocked_retry_speed": 0.5,
+ "note": "A move the robot side stops as blocked is sent once more at this fraction of its speed (tools/util/arm.py). Between 0 and 1: 0.5 is half as fast, 1 the same speed again, 0 no second try.",
+ "speed_scale": 0.5,
+ "note_speed_scale": "speed_scale: every arm move runs at this fraction of the speed its tool asks for (tools/util/arm.py). 1 is normal; 0.5 is the slow, careful setting in use since 2026-11-22.",
+ "extra_descent_clearance_m": 0.015,
+ "note_extra_descent_clearance": "After observed mat contact on 2026-11-22: real-arm table approaches end another 15 mm higher, with the original hover height, shortening their descent. All joint paths also keep modelled fingertips at least the existing 10 mm correction plus this margin above the mat, even with check=false or allow_low=true. Generic Cartesian targets below this limit are refused, not silently changed."
+}

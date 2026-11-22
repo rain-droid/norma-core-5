@@ -2,6 +2,22 @@
 
 # The two "KD-USB Cameras" are identical models; these ids encode the USB port each is on.
 # If you replug them into different ports, run `uv run python scripts/probe.py` and swap.
+# Two arms share the Station: this daemon drives the ElRobot's servo bus. The SO-101's is 5B91029197.
+bus_serial: "5B3E089748"
+
 cameras:
   "0x1312402c7f4a60": wrist
   "0x1312202c7f4a60": top
+  # Linux ids are vendor:product:bus:device and change when a camera is replugged; re-run scripts/probe.py then.
+  # Only one KD camera is left (on the wrist), so its id needs no bus:device part either.
+  "11391:19040": wrist
+  # The UGREEN webcam (vendor:product 3141:8835) hangs over the mat and is the camera to measure with.
+  # Its id needs no bus:device part, there is only one. Before the Station starts, give it a short fixed
+  # exposure so the mat's corner tags decode: scripts/cameras_ready.sh
+  "3141:8835": top
+  # The colour camera of the Orbbec DaBai DCW2 (vendor:product 2bc5:0561) on the stand across the table.
+  # Its depth sensor is a second USB device (2bc5:06a0) that the Station does not read.
+  "11205:1377": across
+
+# The base stands on the table; the mat's top surface is 10 mm above it.
+table_z: 0.010

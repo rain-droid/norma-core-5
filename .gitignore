@@ -18,3 +18,4 @@ models/
 data/audio/
 .pytest_cache/
 .ruff_cache/
+.pixi/

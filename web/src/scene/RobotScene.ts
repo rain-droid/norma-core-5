@@ -12,9 +12,9 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { URDFRobot } from 'urdf-loader';
-import type { RobotState, WorldMarker } from '../api/types.ts';
+import type { RobotState, SecondArmState, WorldMarker } from '../api/types.ts';
 import { live, type Plan, type Sample } from '../state/app.ts';
-import { LabelLayer, Markers, PlanOverlay, Trail } from './overlays.ts';
+import { LabelLayer, Markers, PlanOverlay, Trail, ObstacleField } from './overlays.ts';
 import {
   applyGripper,
   loadRobot,
@@ -67,10 +67,14 @@ export class RobotScene {
   private lights: { dispose(): void };
   private labels: LabelLayer;
   private plan: PlanOverlay;
+  private obstacles = new ObstacleField();
   private trail = new Trail();
   private markers: Markers;
 
   private model: RobotModel | null = null;
+  /** The second arm, once its model has loaded; drawn in the same base frame. */
+  private second: RobotModel | null = null;
+  private secondLoading = false;
   private ghost: URDFRobot | null = null;
   private ghostMaterial: ShaderMaterial = makeGhostMaterial();
   private ghostOpacity = 0;
@@ -115,7 +119,7 @@ export class RobotScene {
     this.labels = new LabelLayer(labelHost);
     this.plan = new PlanOverlay(this.labels);
     this.markers = new Markers(this.labels);
-    this.world.add(this.markers.group, this.trail.mesh, this.trail.tip, this.plan.group);
+    this.world.add(this.markers.group, this.trail.mesh, this.trail.tip, this.plan.group, this.obstacles.group);
 
     const controls = new OrbitControls(this.camera, renderer.domElement);
     controls.enableDamping = true;
@@ -179,6 +183,11 @@ export class RobotScene {
     this.plan.set(plan);
   }
 
+  /** The things on the table from the last depth scan; null clears them. */
+  setObstacles(o: { cell: number; tableZ: number; boxes: [number, number, number][] } | null): void {
+    this.obstacles.set(o);
+  }
+
   setMarkers(markers: WorldMarker[]): void {
     this.markers.set(markers, performance.now());
   }
@@ -213,6 +222,7 @@ export class RobotScene {
     this.resizeObserver.disconnect();
     this.controls.dispose();
     this.plan.dispose();
+    this.obstacles.dispose();
     this.trail.dispose();
     this.markers.dispose();
     this.labels.dispose();
@@ -330,6 +340,50 @@ export class RobotScene {
     this.renderer.render(this.scene, this.camera);
   };
 
+  /**
+   * The second arm: loaded the first time the daemon reports one that has been
+   * placed, then posed from its latest joint angles. It moves slowly and is
+   * polled at 10 Hz, so it is not interpolated.
+   */
+  private applySecond(s: SecondArmState | null | undefined): void {
+    if (!s || !s.T) {
+      if (this.second) this.second.robot.visible = false;
+      return;
+    }
+    if (!this.second) {
+      if (this.secondLoading) return;
+      this.secondLoading = true;
+      loadRobot(s.urdf, () => {})
+        .then((m) => {
+          if (this.disposed) return;
+          // Told apart from the first arm at a glance: dark printed parts, orange jaws.
+          m.materials[0].color.set(0x26324f);
+          m.materials[1].color.set(0xff5b14);
+          m.robot.matrixAutoUpdate = false;
+          this.second = m;
+          this.world.add(m.robot);
+        })
+        .catch(() => {
+          window.setTimeout(() => (this.secondLoading = false), 5000);
+        });
+      return;
+    }
+    const robot = this.second.robot;
+    const T = s.T;
+    robot.visible = true;
+    robot.matrix.set(
+      T[0][0], T[0][1], T[0][2], T[0][3],
+      T[1][0], T[1][1], T[1][2], T[1][3],
+      T[2][0], T[2][1], T[2][2], T[2][3],
+      0, 0, 0, 1,
+    );
+    robot.matrixWorldNeedsUpdate = true;
+    for (const j of s.joints) {
+      if (j.name !== 'rev_motor_08' && j.name in robot.joints && Number.isFinite(j.q)) robot.setJointValue(j.name, j.q);
+    }
+    applyGripper(robot, s.gripper?.open ?? 1);
+  }
+
   /** Pose the twin from the two state samples that bracket "a moment ago". */
   private applyState(now: number, dt: number): void {
     const model = this.model;
@@ -361,6 +415,7 @@ export class RobotScene {
         now,
       );
     }
+    this.applySecond(sb.second_arm);
     if (!model) return;
 
     let lag = 0;

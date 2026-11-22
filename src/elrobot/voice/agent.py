@@ -22,10 +22,13 @@ import asyncio
 import json
 import logging
 import os
+import re
+import shlex
 import shutil
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 from claude_agent_sdk import (
@@ -176,6 +179,8 @@ def summarise_tool_result(block: ToolResultBlock) -> tuple[bool | None, str, boo
         if isinstance(payload, dict):
             if isinstance(payload.get("ok"), bool) and ok is None:
                 ok = payload["ok"]
+            elif ok is None and "history" in payload:  # a workspace tool: it has no ok flag, an error or none
+                ok = "error" not in payload
             summary = str(payload.get("summary") or payload.get("error") or "")
             if summary or "ok" in payload:
                 break
@@ -187,7 +192,66 @@ def summarise_tool_result(block: ToolResultBlock) -> tuple[bool | None, str, boo
 
 
 def load_persona() -> str:
-    return config.PERSONA_PATH.read_text(encoding="utf-8").strip()
+    path = config.WORKSPACE_PERSONA_PATH if config.workspace_agent() else config.PERSONA_PATH
+    return path.read_text(encoding="utf-8").strip()
+
+
+# What the workspace agent's shell may run: one workspace tool, or one of its own scripts, per
+# command, through the workspace's interpreter. Nothing is chained, piped or redirected.
+_RUNNERS = (["pixi", "run", "python"], ["uv", "run", "python"], ["uv", "run", "-q", "python"], ["python"], ["python3"])
+_SHELL_ACTIVE = set(";&|<>()`$\\\"\n{}*?~#!")
+
+
+def workspace_permission(tool: str, args: dict[str, Any], workspace: Path) -> str | None:
+    """Why the workspace agent may not make this call, or None if it may.
+
+    Nobody is at a prompt to approve anything, so the rule is fixed: it may read inside the
+    repository, write inside the workspace except its calibration, and run Python files that
+    live in the workspace. Scripts it writes itself are part of that: writing and running code
+    against the planner is how it does what no tool does.
+    """
+    workspace = workspace.resolve()
+
+    def inside(path: str, root: Path) -> bool:
+        try:
+            p = Path(path).expanduser()
+            (p if p.is_absolute() else workspace / p).resolve().relative_to(root)
+            return True
+        except (ValueError, OSError):
+            return False
+
+    if tool in ("Read", "Glob", "Grep"):
+        path = args.get("file_path") or args.get("path") or "."
+        return None if inside(str(path), workspace.parent) else "you may only read inside the robot's repository"
+    if tool in ("Write", "Edit"):
+        path = str(args.get("file_path") or "")
+        if not inside(path, workspace):
+            return "you may only write inside the workspace"
+        if inside(path, workspace / "robot_config") or inside(path, workspace / ".claude"):
+            return "the robot's model and calibration are not yours to change from a conversation"
+        return None
+    if tool == "Bash":
+        command = str(args.get("command") or "").strip()
+        # Outside single quotes nothing the shell would act on is let through; inside them the
+        # shell takes every character as it is, so the JSON argument can say anything.
+        quoted = False
+        for ch in command:
+            if ch == "'":
+                quoted = not quoted
+            elif not quoted and ch in _SHELL_ACTIVE:
+                return ("one plain command at a time: no pipes, chaining, redirection, substitution or double quotes. "
+                        "Put the JSON argument in single quotes, and leave apostrophes out of it.")  # fmt: skip
+        if quoted:
+            return "that command has an unclosed quote"
+        words = shlex.split(command)
+        for runner in _RUNNERS:
+            if words[: len(runner)] == runner and len(words) > len(runner):
+                script = words[len(runner)]
+                if script.endswith(".py") and inside(script, workspace) and len(words) <= len(runner) + 2:
+                    return None
+                return "run one Python file from the workspace, with at most one argument (the JSON)"
+        return "the only command you have is running a workspace tool: pixi run python tools/NAME.py '{...}'"
+    return f"the {tool} tool is not available here"
 
 
 class Brain:
@@ -427,6 +491,9 @@ class Brain:
                     out.append(TextEnd())
                 elif isinstance(block, ToolUseBlock):
                     name = _short_tool_name(block.name)
+                    if block.name == "Bash":  # the workspace agent's shell: say which tool it ran
+                        ran = re.search(r"(?:tools/)?(\w+)\.py", str((block.input or {}).get("command", "")))
+                        name = ran.group(1) if ran else name
                     turn.tools[block.id] = (name, time.perf_counter())
                     out.append(ToolStart(id=block.id, name=name, input=dict(block.input or {})))
         elif isinstance(message, UserMessage):
@@ -507,6 +574,8 @@ class Brain:
         fallback = config.VOICE_FALLBACK_MODEL
         if fallback.lower() in ("", "none", "off") or fallback == self.model:
             fallback = None
+        if config.workspace_agent():
+            return self._workspace_options(resume, fallback, cli_env)
         return ClaudeAgentOptions(
             # No built-in tools at all: no files, no shell, no web.
             tools=[],
@@ -538,6 +607,44 @@ class Brain:
             cli_path=self.cli_path,
             resume=resume,
             env=cli_env,
+            stderr=self._on_stderr,
+        )
+
+    def _workspace_options(self, resume: str | None, fallback: str | None, cli_env: dict[str, str]) -> ClaudeAgentOptions:
+        """The agent in the workspace: the same harness a Claude Code session started there has,
+        with a fixed rule in place of the person who would approve each command."""
+        workspace = config.WORKSPACE_DIR
+
+        async def may_use(tool: str, args: dict[str, Any], context: Any) -> Any:
+            from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
+
+            why = workspace_permission(tool, args, workspace)
+            if why is None:
+                return PermissionResultAllow()
+            self._log("warn", f"workspace agent refused {tool}: {why}")
+            return PermissionResultDeny(message=why)
+
+        return ClaudeAgentOptions(
+            tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+            # Nothing is approved in advance: every call is put to `may_use`.
+            allowed_tools=[],
+            permission_mode="default",
+            can_use_tool=may_use,
+            strict_mcp_config=True,  # no MCP servers at all: the workspace's tools are files
+            # The project's own instructions only: workspace/CLAUDE.md, which is AGENTS.md.
+            setting_sources=["project"],
+            extra_args={"disable-slash-commands": None},
+            system_prompt=self.persona,
+            model=self.model,
+            fallback_model=fallback,
+            effort=self.effort,  # type: ignore[arg-type]
+            include_partial_messages=True,
+            max_turns=config.WORKSPACE_MAX_STEPS,
+            cwd=str(workspace),
+            cli_path=self.cli_path,
+            resume=resume,
+            # The workspace's tools tag what they do with this, so the web UI shows who asked.
+            env={**cli_env, "ELROBOT_SOURCE": "voice"},
             stderr=self._on_stderr,
         )
 

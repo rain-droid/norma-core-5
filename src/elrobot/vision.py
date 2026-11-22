@@ -199,7 +199,7 @@ class Blob:
         return {"label": label, "box": list(self.box), "point": [round(self.centroid[0], 1), round(self.centroid[1], 1)], "polygon": self.polygon}
 
 
-def _blobs_from_mask(mask: np.ndarray, min_area: float) -> list[Blob]:
+def blobs_from_mask(mask: np.ndarray, min_area: float) -> list[Blob]:
     out = []
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     for c in contours:
@@ -223,7 +223,7 @@ def segment_color(img: np.ndarray, hsv_lo, hsv_hi, min_area: float = 150.0) -> l
     mask = cv2.inRange(hsv, np.array(hsv_lo, np.uint8), np.array(hsv_hi, np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
-    return _blobs_from_mask(mask, min_area)
+    return blobs_from_mask(mask, min_area)
 
 
 def segment_objects(img: np.ndarray, ignore: np.ndarray | None = None, min_area: float = 250.0, thresh: float = 22.0) -> list[Blob]:
@@ -241,7 +241,7 @@ def segment_objects(img: np.ndarray, ignore: np.ndarray | None = None, min_area:
     mask = ((d > thresh) & valid).astype(np.uint8) * 255
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
-    return _blobs_from_mask(mask, min_area)
+    return blobs_from_mask(mask, min_area)
 
 
 def nearest_blob(blobs: list[Blob], u: float, v: float, max_dist: float = 1e9) -> Blob | None:

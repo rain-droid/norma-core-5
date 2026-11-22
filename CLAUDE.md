@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Where to read first
+
+| Question | File |
+|---|---|
+| What can it do, and how far is each part proven? | `docs/FEATURES.md` |
+| Why is it built this way? | `docs/DECISIONS.md` |
+| What are the contracts: tools, joint commands, files, frames, units? | `docs/INTERFACE.md` |
+| The daemon's HTTP and WebSocket API | `docs/API.md` |
+| How an agent should operate the arm | `workspace/AGENTS.md` and `workspace/skills/` |
+| What is left to do before the submission, and in what order | `docs/PLAN.md` |
+| What changed, when, and who changed it | `docs/CHANGELOG.md` |
+| Current state and next steps | `docs/HANDOFF.md` |
+
 ## What this is
 
 `elrobot-agent`: agent control for the ElRobot arm (7 revolute joints + gripper, Feetech ST3215 servos, IDs 1–8) on top of the NormaCore Station. An AI talks to the robot through a tool registry exposed over HTTP, MCP and a voice agent. `docs/HANDOFF.md` records the current state and next steps; `docs/API.md` is the daemon's HTTP/WebSocket contract (keep it in sync when changing the daemon).
@@ -14,8 +27,9 @@ Python 3.12, managed with `uv`:
 uv sync                                   # install (add --extra voice for STT/TTS)
 uv run --with pytest pytest tests -q      # all tests (pytest is not a declared dependency)
 uv run --with pytest pytest tests/test_kinematics.py::test_zero_pose_matches_mesh_measurements -q
+(cd workspace && uv run --with pytest pytest -q tests)   # workspace code against a faked daemon, no robot
 
-uv run elrobot up                         # Station + daemon (needs bin/station and hardware)
+uv run elrobot up                         # Station + daemon (needs bin/station and hardware); `pixi run up` / `pixi run sim` are the same without voice
 uv run elrobot up --sim                   # daemon only, simulated servos, no hardware
 uv run elrobot call home                  # call one tool on the running daemon
 uv run elrobot-mcp                        # MCP stdio shim (wired up in .mcp.json)
@@ -53,12 +67,13 @@ Station (:8888) ⇄ Link ⇄ Robot ⇄ Skills ⇄ tools registry ⇄ daemon HTTP
 - **`tools.py`**: the single tool registry (`@tool(name, description, schema)`). The daemon, the MCP server and the UI all use it. Motion tools are serialized (a second one gets `busy`); `motion=False` tools always run.
 - **`mcp_server.py`**: stdio MCP shim; tool definitions come from `tools.py`, every call is forwarded to the daemon over HTTP (it never touches the arm itself).
 - **`voice/`**: STT (mlx-whisper) → `agent.py` (Claude Agent SDK session that sees only the `elrobot` MCP tools) → TTS (kokoro). Models live in `models/` (gitignored, downloaded).
+- **`workspace.py`** and **`workspace/`**: the second, newer way to drive the arm, and the one current work goes into. An agent started in `workspace/` runs the Python files in `workspace/tools/` in its own shell; they do IK, planning and perception themselves and reach the arm only through `POST /api/joints` (joint angles and a jaw opening). `workspace.py` is the daemon's part: it writes the newest frames and state to `workspace/perception/` twice a second. The workspace has its own interpreter (`workspace/pyproject.toml`) and its own copies of the URDF, `kinematics.py` and the wrist calibration; `tests/test_workspace.py` fails when a copy drifts. See `docs/INTERFACE.md`.
 - **`vision.py`**: frame decode/overlays, simple table-top segmentation, and `CameraModel` (pinhole + k1/k2). A model is either tool-mounted (`rvec_tool_cam`/`t_tool_cam`, the wrist camera) or fixed in the room (`rvec_base_cam`/`t_base_cam`); `pixel_to_plane` intersects a pixel ray with a horizontal table plane, which is how 3D positions are obtained (cameras are RGB only, no depth).
 
 ## Calibration and data
 
 - Joint ranges: Station calibration, stored in servo EEPROM / NormFS; done with `scripts/calibrate.py --manual`.
-- Cameras: two identical "KD-USB Camera"s, `wrist` and `top`, told apart only by the USB-port-encoded unique id in `config.yaml` (re-run `probe.py` and swap if replugged). `scripts/calibrate_camera.py` (core in `calib.py`) does lens intrinsics with an 8x6-inner-corner, 25 mm chessboard, the fixed camera's pose by touching AprilTag (`tag25h9`) centres with the limp arm, and the wrist camera's mounting by hand-eye calibration. Results go to `data/camera_<name>.json`, which `Skills` loads (`camera_wrist.json`). The extrinsics/verify steps talk to the running daemon, not the Station.
+- Cameras: three. `top` is a UGREEN webcam above the mat, the camera to measure with; its calibration is `workspace/robot_config/camera_top.json`, fitted from the mat's corner tags by `workspace/tools/calibrate_top.py`. `wrist` and `across` are two identical "KD-USB Camera"s, told apart only by the USB-port-encoded unique id in `config.yaml` (re-run `probe.py` and swap if replugged); no tool uses `across`. Run `scripts/cameras_ready.sh` before each Station start, or frames come out 640x480. `scripts/calibrate_camera.py` (core in `calib.py`) does lens intrinsics with an 8x6-inner-corner, 25 mm chessboard, the fixed camera's pose by touching AprilTag (`tag25h9`) centres with the limp arm, and the wrist camera's mounting by hand-eye calibration. Results go to `data/camera_<name>.json`, which `Skills` loads (`camera_wrist.json`). The extrinsics/verify steps talk to the running daemon, not the Station.
 - The wrist camera is calibrated (2026-11-22, `data/camera_wrist.json`): lens to 0.56 px; mounting `t_tool_cam` = [4.1, -73.4, -64.5] mm, tilted about 28 degrees, fitted to 49 hand-held poses from three runs with 8.7 px left over (about 7 mm at working distance). Each run alone stayed at 10 to 13 mm spread, above the script's 8 mm limit, so the saved mounting is a joint fit over all three and not what one run of the script writes. The default it replaces was about 4 cm and 28 degrees out.
 - What the hand-eye runs taught:
   - The 8x6 board looks the same turned half round, and the detector then counts from the far corner: 11 of 49 samples came out that way and wreck the solution (49 mm spread instead of 13). `calib.unflip_boards` turns them back; the script calls it.
@@ -66,4 +81,4 @@ Station (:8888) ⇄ Link ⇄ Robot ⇄ Skills ⇄ tools registry ⇄ daemon HTTP
   - More poses do not help beyond about 15; different ones do. Lay the board about 20 cm in front of the base so the arm can look straight down and from both sides; further out it only gets slanted views from the robot's side.
   - The script waits for Enter twice. Started without a terminal it now carries on and leaves the arm limp at the end; each pose is written to `samples.json` as it is taken, and `--from-dir` solves again from them. `--guide` says which pose to take next (German).
 - `data/sit_pose.json`: the folded resting pose. Runtime output goes to `logs/` (gitignored).
-- Skills and tools currently use only the wrist camera; the top camera is not yet used for 3D.
+- The daemon's own skills and tools (`skills.py`, `tools.py`: what MCP, the voice agent and the UI call) use only the wrist camera. The workspace tools measure with the top camera and use the wrist camera for close looks and grasp checks.

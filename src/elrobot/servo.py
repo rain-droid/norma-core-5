@@ -9,11 +9,13 @@ TICKS = 4096
 
 # RAM registers (address, size in bytes)
 REG_OFFSET = 0x1F  # EEPROM: position offset the servo subtracts from its encoder reading
+REG_OVERLOAD_TORQUE = 0x24  # EEPROM: output (%) that, held for 2 s, trips overload protection
 REG_TORQUE_ENABLE = 0x28
 REG_ACC = 0x29
 REG_GOAL_POSITION = 0x2A
 REG_GOAL_SPEED = 0x2E
 REG_TORQUE_LIMIT = 0x30
+REG_LOCK = 0x37  # 0 lets EEPROM registers be written, 1 protects them
 REG_PRESENT_POSITION = 0x38
 REG_PRESENT_SPEED = 0x3A
 REG_PRESENT_LOAD = 0x3C
@@ -63,6 +65,7 @@ class MotorState:
     range_frozen: bool = False
     has_error: bool = False  # bus-level error reported by the Station for this servo
     offset: int = 0  # EEPROM position offset; raw encoder position = (tick + offset) mod 4096
+    overload_torque: int = 0  # EEPROM overload-protection threshold, percent of full output
 
     @property
     def encoder(self) -> int:
@@ -90,6 +93,7 @@ class MotorState:
             status=dump[REG_STATUS],
             moving=dump[REG_MOVING] != 0,
             offset=struct.unpack_from("<h", dump, REG_OFFSET)[0],
+            overload_torque=dump[REG_OVERLOAD_TORQUE],
             **extra,
         )
 

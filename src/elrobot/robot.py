@@ -24,7 +24,6 @@ from .kinematics import (
     approach_from_pitch,
     jaw_from_yaw,
     quat_from_matrix,
-    unit,
 )
 from .link import Link
 from .motion import Trajectory, interpolate_joint
@@ -39,6 +38,10 @@ class RobotError(Exception):
 
 class Stopped(RobotError):
     """The motion was interrupted by stop()."""
+
+
+class Blocked(RobotError):
+    """A joint trailed its setpoint for too long: something is in the way, or the move was too heavy or fast."""
 
 
 @dataclass
@@ -93,6 +96,11 @@ class ContactGuard:
         return None
 
 
+PACE_MIN = 0.05  # the slowest a motion can be asked to run, as a fraction of its planned speed
+PACE_RAMP_S = 0.3  # seconds to go from full speed to standstill pace or back
+PACE_HOLD_MAX_S = 5.0  # the longest one request for a slower pace lasts
+
+
 class Robot:
     def __init__(self, link: Link, cfg: Config):
         self.link = link
@@ -105,6 +113,8 @@ class Robot:
 
         self._motion = asyncio.Lock()
         self._stop_evt = asyncio.Event()
+        self._pace = 1.0  # fraction of the planned speed that motions run at, while _pace_until lies ahead
+        self._pace_until = 0.0
         self._cmd_q: np.ndarray | None = None  # last desired arm angles
         self._bias = np.zeros(7)  # added to the desired angles to cancel servo droop
         self._grip_goal: float | None = None
@@ -113,6 +123,9 @@ class Robot:
         self.source: str | None = None
         # Called with (path_points, target) whenever a motion is planned; path [] clears.
         self.on_plan: Callable[[list, dict | None], None] | None = None
+        # Called with each command handed to the servos: {"joints": [7 rad], ...} for an arm
+        # trajectory's end point, {"gripper": 0..1} for the jaws.
+        self.on_command: Callable[[dict], None] | None = None
 
     # ================================================================== state
 
@@ -192,6 +205,7 @@ class Robot:
             "calibrated": False,
             "torque": False,
             "busy": self._motion.locked(),
+            "pace": self.pace,
             "activity": self.activity,
             "source": self.source,
             "joints": [],
@@ -238,7 +252,7 @@ class Robot:
             )  # fmt: skip
         if calibrated:
             g = self.gripper_open()
-            out["gripper"] = {"open": round(g, 3), "width_mm": round(g * GRIPPER_MAX_WIDTH * 1000, 1), "holding": self.holding}
+            out["gripper"] = {"open": round(g, 3), "width_mm": round(g * GRIPPER_MAX_WIDTH * 1000, 1), "holding": self.still_holding()}
             T = self.kin.fk(self.q())
             out["ee"] = {
                 "pos": [round(float(v), 4) for v in T[:3, 3]],
@@ -252,17 +266,7 @@ class Robot:
     def check_config(self, q, *, allow_low: bool = False) -> str | None:
         """Why this arm configuration is not allowed, or None if it is fine."""
         c = self.cfg
-        g = self.kin.geometry(q)
-        floor = c.table_z + (0.0 if allow_low else c.floor_clearance)
-        low = float(min(g.tips[:, 2].min(), g.tcp[2]))
-        if low < floor - 1e-6:
-            return f"fingertips would be {1000 * (floor - low):.0f} mm into the table"
-        body = np.vstack([g.joints[2:], g.wrist[None], g.extras]) if len(g.extras) else np.vstack([g.joints[2:], g.wrist[None]])
-        if float(body[:, 2].min()) < c.table_z + c.body_clearance:
-            return "the arm body would hit the table"
-        if float(g.tcp[1]) < c.min_y or float(g.wrist[1]) < c.min_y:
-            return "that is behind the robot, off the table"
-        return self.kin.self_collision(q)
+        return self.kin.clearance(q, table_z=c.table_z, floor=0.0 if allow_low else c.floor_clearance, body=c.body_clearance, min_y=c.min_y)
 
     def check_path(self, path, *, allow_low: bool = False) -> str | None:
         for q in path:
@@ -308,25 +312,13 @@ class Robot:
     def plan_linear(self, q_start, pos, *, approach=None, step: float = 0.008, allow_low: bool = False) -> np.ndarray:
         """Joint path that moves the TCP in a straight line to `pos`, holding `approach`
         (defaults to the current approach direction)."""
-        T0 = self.kin.fk(q_start)
-        p0 = T0[:3, 3]
-        a = unit(approach) if approach is not None else T0[:3, 2]
-        pos = np.asarray(pos, dtype=float)
-        n = max(2, int(math.ceil(np.linalg.norm(pos - p0) / step)) + 1)
-        path = [np.asarray(q_start, dtype=float)]
-        for k in range(1, n):
-            p = p0 + (pos - p0) * (k / (n - 1))
-            r = self.kin.ik(p, approach=a, q_seed=path[-1], limit_margin=self.cfg.limit_margin,
-                            random_seeds=0, ref_weight=0.05, pos_tol=0.002, ang_tol=math.radians(4))  # fmt: skip
-            if not r.ok:
-                raise RobotError(f"can't move in a straight line to there: stuck {100 * k / (n - 1):.0f}% of the way ({r.describe()})")
-            if np.max(np.abs(r.q - path[-1])) > 0.35:
-                raise RobotError("can't move in a straight line to there: the arm would have to flip configuration")
-            path.append(r.q)
+        path, r = self.kin.ik_line(q_start, pos, approach=approach, step=step, limit_margin=self.cfg.limit_margin)
+        if not r.ok:
+            raise RobotError(f"can't move in a straight line to there: {r.reason} (pos_err={r.pos_err * 1000:.1f}mm ang_err={math.degrees(r.ang_err):.1f}deg)")
         why = self.check_path(path, allow_low=allow_low)
         if why:
             raise RobotError(f"straight-line move rejected: {why}")
-        return np.array(path)
+        return path
 
     def _emit_plan(self, path, target: dict | None = None) -> None:
         if self.on_plan is None:
@@ -377,6 +369,19 @@ class Robot:
         self._bias[:] = 0.0
         self.holding = False
 
+    @property
+    def pace(self) -> float:
+        """The fraction of its planned speed a motion runs at now: 1.0 unless someone asked for less."""
+        return self._pace if time.monotonic() < self._pace_until else 1.0
+
+    def set_pace(self, scale: float, hold_s: float = 0.5) -> float:
+        """Run motions at `scale` of their planned speed for the next `hold_s` seconds. Whoever
+        wants the arm slow keeps asking; when they stop asking (or die) it returns to full speed
+        by itself. A motion under way changes speed smoothly (PACE_RAMP_S) along the same path."""
+        self._pace = min(1.0, max(PACE_MIN, float(scale)))
+        self._pace_until = time.monotonic() + min(PACE_HOLD_MAX_S, max(0.0, float(hold_s)))
+        return self._pace
+
     async def stop(self) -> None:
         """Halt any motion now and hold position."""
         self._stop_evt.set()
@@ -393,6 +398,62 @@ class Robot:
         await self.link.write_goals(self._arm_ticks(q + self._bias))
         self._cmd_q = q
 
+    async def guide(self, seconds: float = 30.0, *, allow_low: bool = True) -> dict:
+        """Let a person lead the arm by hand, and remember where they took it.
+
+        The arm holds its pose as usual. A joint pushed more than `guide_deadband` off its
+        resting error has its command follow the push, so the arm goes where the hand takes it
+        and stays there when let go. What a joint's error does slowly (gravity changing with the
+        pose) is taken as the new resting error, so the arm does not creep, and a push held
+        still fades over a few seconds. The table and joint limits still hold: the command does
+        not follow into them (`allow_low` lets the fingertips come down to the table, as a grasp
+        needs). Ends after `seconds`, on stop, or when the arm has been moved and then left alone
+        for `guide_idle_s`. Returns the joint path travelled, start included.
+        """
+        async with self._motion:
+            await self._begin("being led by hand")
+            cfg, link = self.cfg, self.link
+            dt = 1.0 / cfg.control_hz
+            try:
+                q_cmd = self._plan_start()
+                await link.write_goals(self._arm_ticks(q_cmd + self._bias))
+                self._cmd_q = q_cmd
+                await asyncio.sleep(0.2)
+                rest = self.q() - q_cmd  # each joint's error with nobody pushing: gravity
+                path, t0, last_push = [q_cmd.copy()], time.monotonic(), None
+                why = "time"
+                while time.monotonic() - t0 < seconds:
+                    now = time.monotonic()
+                    if self._stop_evt.is_set():
+                        why = "stopped"
+                        break
+                    if last_push is not None and now - last_push > cfg.guide_idle_s:
+                        why = "left alone"
+                        break
+                    if link.state_age > cfg.stale_state_s:
+                        raise RobotError(f"lost servo state for {link.state_age:.1f}s; holding position")
+                    err = self.q() - q_cmd
+                    off = err - rest
+                    pushed = np.abs(off) > cfg.guide_deadband
+                    rest += np.where(pushed, dt / 4.0, dt / 1.0) * (err - rest)
+                    if pushed.any():
+                        step = np.where(pushed, off - np.sign(off) * cfg.guide_deadband, 0.0) * cfg.guide_gain * dt
+                        q_new = self.kin.clamp(q_cmd + np.clip(step, -cfg.guide_max_speed * dt, cfg.guide_max_speed * dt))
+                        if self.check_config(q_new, allow_low=allow_low) is None:
+                            q_cmd, last_push = q_new, now
+                            await link.write_goals(self._arm_ticks(q_cmd + self._bias))
+                            self._cmd_q = q_cmd
+                            if np.max(np.abs(q_cmd - path[-1])) > 0.04:
+                                path.append(q_cmd.copy())
+                    await asyncio.sleep(dt)
+                if np.max(np.abs(q_cmd - path[-1])) > 0.005:
+                    path.append(q_cmd.copy())
+                return {"path": [[round(float(v), 4) for v in q] for q in path], "moved": len(path) > 1, "ended": why,
+                        "seconds": round(time.monotonic() - t0, 1)}  # fmt: skip
+            finally:
+                self._stop_evt.clear()
+                self.activity = "idle"
+
     def _integrate_droop(self, lag: np.ndarray, gain: float, dt: float) -> None:
         cfg = self.cfg
         small = np.abs(lag) < cfg.droop_max_lag
@@ -404,9 +465,11 @@ class Robot:
         t0 = time.monotonic()
         lag_since: float | None = None
         tick_n = 0
+        t, rate, last = 0.0, self.pace, t0  # t is time along the trajectory: it runs slower than the clock while the pace is below 1
         while True:
             now = time.monotonic()
-            t = now - t0
+            rate += min(max(self.pace - rate, -(now - last) / PACE_RAMP_S), (now - last) / PACE_RAMP_S)
+            t, last = t + rate * (now - last), now
             if self._stop_evt.is_set():
                 await self._hold_here()
                 raise Stopped("stopped")
@@ -432,7 +495,7 @@ class Robot:
                 if now - lag_since > cfg.stall_time:
                     j = int(np.argmax(np.abs(lag))) + 1
                     await self._hold_here()
-                    raise RobotError(f"blocked: joint {j} is {math.degrees(abs(lag[j - 1])):.0f} deg behind where it should be. Something is in the way or the load is too heavy.")
+                    raise Blocked(f"blocked: joint {j} is {math.degrees(abs(lag[j - 1])):.0f} deg behind where it should be. Something is in the way or the load is too heavy.")
             else:
                 lag_since = None
             if t >= traj.duration:
@@ -465,6 +528,9 @@ class Robot:
         return MoveResult("done", residual=residual)
 
     async def _begin(self, label: str) -> None:
+        # IK runs on the event loop and can starve the state reader for over half a second;
+        # let it catch up before judging the link dead
+        await self.link.wait_connected(1.0)
         why = self.why_not_ready()
         if why:
             raise RobotError(why)
@@ -506,6 +572,8 @@ class Robot:
 
     async def _execute(self, path: np.ndarray, speed: float, guard: ContactGuard | None) -> MoveResult:
         speed = min(2.0, max(0.05, speed))
+        if self.on_command is not None:
+            self.on_command({"joints": [round(float(v), 5) for v in path[-1]], "waypoints": len(path), "speed": speed, "guarded": guard is not None})
         traj = Trajectory.through(path, self.cfg.max_joint_speed * speed, self.cfg.max_joint_accel * min(1.5, max(0.3, speed)))
         return await self._run(traj, guard=guard)
 
@@ -556,16 +624,19 @@ class Robot:
 
     async def _gripper_wait(self, timeout: float = 2.5) -> float:
         """Wait for the jaws to stop moving; returns the achieved opening (0..1)."""
-        m = self.link.motors
+        # StationLink replaces link.motors on every state update, so look the servo up each time
+        tick_now = lambda: self.link.motors[GRIPPER_ID].tick  # noqa: E731
         t0 = time.monotonic()
-        last_tick = m[GRIPPER_ID].tick
+        last_tick = tick_now()
         still_since = None
-        await asyncio.sleep(0.12)
+        # the real servo starts moving ~0.3 s after the command; don't mistake that for a stall
+        while abs(tick_now() - last_tick) <= 2 and time.monotonic() - t0 < 0.6:
+            await asyncio.sleep(0.02)
         while time.monotonic() - t0 < timeout:
             if self._stop_evt.is_set():
                 raise Stopped("stopped")
             await asyncio.sleep(0.04)
-            tick = m[GRIPPER_ID].tick
+            tick = tick_now()
             if abs(tick - last_tick) <= 2:
                 still_since = still_since or time.monotonic()
                 if time.monotonic() - still_since > 0.2:
@@ -582,6 +653,8 @@ class Robot:
             try:
                 open_frac = min(1.0, max(0.0, float(open_frac)))
                 await self.link.write_goals({GRIPPER_ID: self._gripper_tick(open_frac)})
+                if self.on_command is not None:
+                    self.on_command({"gripper": open_frac})
                 self._grip_goal = open_frac
                 reached = await self._gripper_wait()
                 if open_frac > 0.5:
@@ -602,6 +675,8 @@ class Robot:
             try:
                 closed_tick = self._gripper_tick(0.0)
                 await self.link.write_goals({GRIPPER_ID: closed_tick})
+                if self.on_command is not None:
+                    self.on_command({"gripper": 0.0, "until_stall": True})
                 reached = await self._gripper_wait(timeout=3.0)
                 self.holding = reached > self.cfg.holding_min_open
                 if self.holding:

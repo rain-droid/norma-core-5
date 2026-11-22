@@ -1,0 +1,24 @@
+# The workspace's own interpreter and libraries, so this directory works on its own and can be
+# copied as a whole. From here, `pixi run python tools/NAME.py` (or `uv run python ...`) uses them.
+[project]
+name = "elrobot-workspace"
+version = "0.1.0"
+description = "RoboHarness V2-style agent workspace for the ElRobot arm: tools, skills, perception and body, driven by joint commands"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2.0",
+    "opencv-python-headless>=4.10",
+    "pin-pink>=4.0",  # inverse kinematics (Pinocchio)
+    "daqp>=0.5",  # the QP solver pink calls
+    "chess>=1.10",  # legal moves and game state for the chess tools (GPL-3.0)
+]
+
+[tool.uv]
+package = false
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64"]
+
+[tool.pixi.dependencies]
+python = "3.12.*"

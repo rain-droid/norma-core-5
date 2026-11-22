@@ -9,6 +9,7 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
+  BoxGeometry,
   DoubleSide,
   DynamicDrawUsage,
   Group,
@@ -451,5 +452,52 @@ export class Markers {
     this.set([], 0);
     this.sphere.dispose();
     this.ringGeo.dispose();
+  }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Things on the table (depth camera)                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The obstacle map of the last scan: one translucent column per cell of the
+ * depth camera's height grid that has something on it, coloured by height
+ * (teal low, orange high). Lives in the robot base frame like everything else.
+ */
+export class ObstacleField {
+  readonly group = new Group();
+  private geo = new BoxGeometry(1, 1, 1);
+  private material = new MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, metalness: 0, transparent: true, opacity: 0.62 });
+  private mesh: InstancedMesh | null = null;
+
+  set(o: { cell: number; tableZ: number; boxes: [number, number, number][] } | null): void {
+    if (this.mesh) {
+      this.group.remove(this.mesh);
+      this.mesh.dispose();
+      this.mesh = null;
+    }
+    if (!o || o.boxes.length === 0) return;
+    const mesh = new InstancedMesh(this.geo, this.material, o.boxes.length);
+    const m = new Matrix4();
+    const c = new Color();
+    o.boxes.forEach(([x, y, h], i) => {
+      m.makeScale(o.cell, o.cell, h);
+      m.setPosition(x, y, o.tableZ + h / 2);
+      mesh.setMatrixAt(i, m);
+      c.setHSL(0.5 - 0.44 * Math.min(1, h / 0.08), 0.85, 0.55);
+      mesh.setColorAt(i, c);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.castShadow = true;
+    this.mesh = mesh;
+    this.group.add(mesh);
+  }
+
+  dispose(): void {
+    this.set(null);
+    this.geo.dispose();
+    this.material.dispose();
   }
 }

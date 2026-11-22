@@ -20,7 +20,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from scipy.optimize import least_squares
+import pink
+import pinocchio as pin
+from pink.exceptions import PinkError
+from pink.limits import ConfigurationLimit
+from pink.tasks import FrameTask, PostureTask
+
+_TCP = "tcp"  # name of the tool frame in the Pinocchio model
 
 ARM_JOINT_NAMES = [f"rev_motor_{i:02d}" for i in range(1, 8)]
 GRIPPER_JOINT_NAME = "rev_motor_08"
@@ -197,6 +203,34 @@ class Kinematics:
         self._tips_tool = np.array([[half, 0, TCP_BACKOFF], [-half, 0, TCP_BACKOFF]])
         # Extra body points (tool frame) included in clearance checks, e.g. the wrist camera.
         self.extra_points_tool = np.zeros((0, 3))
+        # The wrist camera on its mount, when the URDF has it (camera_mount_joint, camera_joint): the foot
+        # of the mount and the front of the lens, in the gripper base frame. It stands 7 cm off the
+        # gripper's axis, further than anything else on the hand.
+        self.camera_tip = None
+        named = {j.get("name"): j for j in root.findall("joint")}
+        if "camera_mount_joint" in named and "camera_joint" in named:
+
+            def fixed(name: str) -> np.ndarray:
+                o = named[name].find("origin")
+                return _transform([float(v) for v in o.get("xyz", "0 0 0").split()], [float(v) for v in o.get("rpy", "0 0 0").split()])
+
+            mount = fixed("camera_mount_joint")
+            camera = mount @ fixed("camera_joint")
+            lens = camera[:3, :3] @ np.array([0.025, 0.0, 0.0]) + camera[:3, 3]
+            self.camera_tip = np.array([mount[:3, 3], lens])
+            self.extra_points_tool = ((lens - self.T_tip_tool[:3, 3]) @ R_tool)[None]
+
+        # The same arm as a Pinocchio model, for pink's inverse kinematics: the seven arm joints
+        # (gripper joints locked) and a frame at the tool point. If it ever disagreed with fk()
+        # the IK round-trip test would fail.
+        full = pin.buildModelFromUrdf(str(self.urdf_path))
+        locked = [full.getJointId(n) for n in full.names[1:] if n not in ARM_JOINT_NAMES]
+        self._model = pin.buildReducedModel(full, locked, pin.neutral(full))
+        tip = self._model.getFrameId(TIP_LINK)
+        link = self._model.frames[tip]
+        placement = link.placement * pin.SE3(self.T_tip_tool[:3, :3], self.T_tip_tool[:3, 3])
+        self._model.addFrame(pin.Frame(_TCP, link.parentJoint, tip, placement, pin.FrameType.OP_FRAME))
+        self._data = self._model.createData()
 
     # ------------------------------------------------------------------ forward
 
@@ -238,30 +272,6 @@ class Kinematics:
             extras=extras,
         )
 
-    def _fk_and_axes(self, q):
-        """TCP pose plus each joint's world axis and origin, for Jacobians."""
-        T = np.eye(4)
-        axes = np.zeros((self.n, 3))
-        origins = np.zeros((self.n, 3))
-        for i, (j, qi) in enumerate(zip(self.joints, q)):
-            T = T @ j.pre
-            axes[i] = T[:3, :3] @ j.axis
-            origins[i] = T[:3, 3]
-            R = np.eye(4)
-            R[:3, :3] = axis_angle_matrix(j.axis, float(qi))
-            T = T @ R
-        return T @ self.tip_post @ self.T_tip_tool, axes, origins
-
-    def jacobian(self, q) -> np.ndarray:
-        """6x7 geometric Jacobian of the TCP (linear rows first) in the base frame."""
-        T, axes, origins = self._fk_and_axes(q)
-        p = T[:3, 3]
-        J = np.zeros((6, self.n))
-        for i in range(self.n):
-            J[:3, i] = np.cross(axes[i], p - origins[i])
-            J[3:, i] = axes[i]
-        return J
-
     # ------------------------------------------------------------------ clearance
 
     def body_segments(self, q) -> list[tuple[np.ndarray, np.ndarray, float]]:
@@ -278,22 +288,47 @@ class Kinematics:
             (j[3], j[5], 0.028),  # forearm
             (j[5], g.wrist, 0.028),  # wrist
             (g.wrist, tip_mid, 0.036),  # gripper
+            *self._camera_segment(q),  # wrist camera, when the URDF has one
         ]
+
+    def _camera_segment(self, q) -> list[tuple[np.ndarray, np.ndarray, float]]:
+        if self.camera_tip is None:
+            return []
+        T = self.fk_tip(q)
+        foot, lens = (T[:3, :3] @ self.camera_tip.T).T + T[:3, 3]
+        return [(foot, lens, 0.022)]
 
     # Body-part pairs that can actually meet. Neighbours, and parts separated by one short
     # link, always sit within their radii of each other and are excluded.
-    _COLLISION_PAIRS = ((0, 3), (0, 4), (0, 5), (1, 4), (1, 5), (2, 5))
-    _PART_NAMES = ("base", "upper arm", "elbow", "forearm", "wrist", "gripper")
+    _COLLISION_PAIRS = ((0, 3), (0, 4), (0, 5), (1, 4), (1, 5), (2, 5), (0, 6), (1, 6), (2, 6))
+    _PART_NAMES = ("base", "upper arm", "elbow", "forearm", "wrist", "gripper", "wrist camera")
 
     def self_collision(self, q, margin: float = 0.0) -> str | None:
         """Name the first pair of body parts that overlap, or None."""
         segs = self.body_segments(q)
         for a, b in self._COLLISION_PAIRS:
+            if b >= len(segs):
+                continue  # no wrist camera in this URDF
             pa, qa, ra = segs[a]
             pb, qb, rb = segs[b]
             if segment_distance(pa, qa, pb, qb) < ra + rb + margin:
                 return f"{self._PART_NAMES[b]} would hit the {self._PART_NAMES[a]}"
         return None
+
+    def clearance(self, q, *, table_z: float, floor: float, body: float, min_y: float) -> str | None:
+        """Why this configuration is not allowed, or None if it is fine: the fingertips at least
+        `floor` above the table, the arm's own joints at least `body` above it, nothing further
+        back than `min_y`, and no part of the arm touching another."""
+        g = self.geometry(q)
+        low = float(min(g.tips[:, 2].min(), g.tcp[2]))
+        if low < table_z + floor - 1e-6:
+            return f"fingertips would be {1000 * (table_z + floor - low):.0f} mm into the table"
+        parts = np.vstack([g.joints[2:], g.wrist[None], g.extras]) if len(g.extras) else np.vstack([g.joints[2:], g.wrist[None]])
+        if float(parts[:, 2].min()) < table_z + body:
+            return "the arm body would hit the table"
+        if float(g.tcp[1]) < min_y or float(g.wrist[1]) < min_y:
+            return "that is behind the robot, off the table"
+        return self.self_collision(q)
 
     # ------------------------------------------------------------------ limits
 
@@ -338,8 +373,9 @@ class Kinematics:
         q_ref:    posture the null space is pulled towards (defaults to q_seed).
         accept:   optional callable(q) -> bool to reject solutions (e.g. collision checks).
 
-        Weights are in metres-per-radian terms: approach_weight=0.15 means a 1 deg pointing error
-        costs as much as a 2.6 mm position error.
+        Costs are relative to 1 per metre of position error: approach_weight=0.15 means a 1 deg
+        pointing error costs as much as a 2.6 mm position error. Solved with pink (differential
+        IK as a QP, joint limits as hard constraints) from each seed in turn.
         """
         pos = np.asarray(pos, dtype=float)
         a_t = unit(approach) if approach is not None else None
@@ -362,37 +398,16 @@ class Kinematics:
         seeds += [rng.uniform(lo, hi) for _ in range(random_seeds)]
 
         def solve(q0, j_t):
-            def make(w_ref):
-                def residual(q):
-                    T, _, _ = self._fk_and_axes(q)
-                    r = [T[:3, 3] - pos]
-                    if a_t is not None:
-                        r.append(approach_weight * (T[:3, 2] - a_t))
-                    if j_t is not None:
-                        r.append(approach_weight * (T[:3, 0] - j_t))
-                    r.append(w_ref * (q - q_ref))
-                    return np.concatenate(r)
-
-                def jac(q):
-                    T, axes, origins = self._fk_and_axes(q)
-                    p = T[:3, 3]
-                    rows = [np.cross(axes, p - origins).T]
-                    if a_t is not None:
-                        rows.append(approach_weight * np.cross(axes, T[:3, 2]).T)
-                    if j_t is not None:
-                        rows.append(approach_weight * np.cross(axes, T[:3, 0]).T)
-                    rows.append(w_ref * np.eye(self.n))
-                    return np.vstack(rows)
-
-                return residual, jac
-
+            conf, tasks, limits = self._problem(q0, lo, hi, a_t, j_t, approach_weight, ref_weight)
             # Stage 1 picks a posture: the pull towards q_ref decides between the many joint
             # solutions a 7-joint arm has. That pull also drags the tool a few millimetres off
-            # target, so stage 2 repeats the solve from there with the pull almost removed.
-            res, jac = make(ref_weight)
-            q1 = least_squares(res, q0, jac=jac, bounds=(lo, hi), method="trf", xtol=1e-9, ftol=1e-10, gtol=1e-10, max_nfev=60).x
-            res, jac = make(ref_weight * 0.02)
-            return least_squares(res, np.clip(q1, lo + 1e-9, hi - 1e-9), jac=jac, bounds=(lo, hi), method="trf", xtol=1e-11, ftol=1e-13, gtol=1e-13, max_nfev=40).x
+            # target, so stage 2 carries on from there with nothing pulling it away.
+            try:
+                self._converge(conf, tasks, limits, pos, a_t, j_t, 40, anchor=q_ref)
+                self._converge(conf, tasks, limits, pos, a_t, j_t, 20)
+            except PinkError:
+                pass  # no step from here; judged below on where it got to
+            return conf.q.copy()
 
         def errors(q, j_t):
             T = self.fk(q)
@@ -436,6 +451,100 @@ class Kinematics:
         if rejected:
             reason = f"{rejected} solution(s) rejected by clearance checks"
         return IKResult(q=q, ok=False, pos_err=pe, ang_err=ae, reason=reason, tried=tried)
+
+    def ik_line(
+        self,
+        q_start,
+        pos,
+        approach=None,
+        *,
+        step: float = 0.008,
+        limit_margin: float = 0.05,
+        pos_tol: float = 0.002,
+        ang_tol: float = math.radians(4.0),
+        approach_weight: float = 0.15,
+        ref_weight: float = 0.01,
+    ) -> tuple[np.ndarray, IKResult]:
+        """Joint path that carries the TCP in a straight line from where `q_start` puts it to
+        `pos`, pointing along `approach` throughout (default: the way it points at the start).
+
+        Each waypoint, `step` metres on from the last, is reached from the previous joint angles
+        by the smallest joint motion that gets there. The arm therefore cannot jump between its
+        many configurations the way independently solved waypoints can, and the same line can
+        be planned in either direction.
+
+        Returns the path and an IKResult for where it ended. `ok` False means the line stopped
+        early: `reason` says how far along, and the path holds the waypoints reached so far.
+        """
+        q_start = np.asarray(q_start, dtype=float)
+        T0 = self.fk(q_start)
+        p0 = T0[:3, 3]
+        a_t = unit(approach) if approach is not None else T0[:3, 2].copy()
+        pos = np.asarray(pos, dtype=float)
+        n = max(2, int(math.ceil(float(np.linalg.norm(pos - p0)) / step)) + 1)
+        # The start may sit inside the margin, or on a limit (a resting arm): it may stay there,
+        # but not go further out.
+        lo = np.minimum(self.lower + limit_margin, q_start)
+        hi = np.maximum(self.upper - limit_margin, q_start)
+        conf, tasks, limits = self._problem(q_start, lo, hi, a_t, None, approach_weight, ref_weight)
+        path = [q_start]
+        result = IKResult(q=q_start, ok=True, pos_err=0.0, ang_err=0.0)
+        for k in range(1, n):
+            p = p0 + (pos - p0) * (k / (n - 1))
+            try:
+                self._converge(conf, tasks, limits, p, a_t, None, 8)
+            except PinkError:
+                pass  # judged below, like any waypoint that was not reached
+            q = conf.q.copy()
+            T = self.fk(q)
+            pe = float(np.linalg.norm(T[:3, 3] - p))
+            ae = math.acos(float(np.clip(T[:3, 2] @ a_t, -1.0, 1.0)))
+            flip = float(np.max(np.abs(q - path[-1]))) > 0.35
+            if pe > pos_tol or ae > ang_tol or flip:
+                reason = f"stuck {100 * k / (n - 1):.0f}% of the way" + (": the arm would have to flip configuration" if flip else "")
+                return np.array(path), IKResult(q=q, ok=False, pos_err=pe, ang_err=ae, reason=reason)
+            path.append(q)
+            result = IKResult(q=q, ok=True, pos_err=pe, ang_err=ae)
+        return np.array(path), result
+
+    def _problem(self, q, lo, hi, a_t, j_t, approach_weight: float, ref_weight: float):
+        """A pink differential-IK problem starting at `q`: the configuration, its tasks (tool
+        pose, then posture) and the joint limits. Rotation about the approach direction is left
+        free unless a jaw direction is asked for."""
+        self._model.lowerPositionLimit, self._model.upperPositionLimit = lo, hi
+        conf = pink.Configuration(self._model, self._data, np.clip(q, lo + 1e-6, hi - 1e-6), copy_data=False)
+        turn = 0.0 if a_t is None else approach_weight if j_t is not None else [approach_weight, approach_weight, 0.0]
+        tasks = (FrameTask(_TCP, position_cost=1.0, orientation_cost=turn, lm_damping=1e-4), PostureTask(cost=ref_weight))
+        return conf, tasks, [ConfigurationLimit(self._model)]
+
+    def _converge(self, conf, tasks, limits, pos, a_t, j_t, max_steps: int, anchor=None) -> None:
+        """Take differential-IK steps towards a tool pose until the joints stop moving.
+
+        The posture task pulls towards `anchor` if given. Without one it only damps each step
+        (its target is wherever the arm is now), so it adds no error once the steps die out.
+        """
+        frame, posture = tasks
+        for _ in range(max_steps):
+            R = np.array(conf.get_transform_frame_to_world(_TCP).rotation)
+            if j_t is not None:
+                R = np.column_stack([j_t, np.cross(a_t, j_t), a_t])
+            elif a_t is not None:
+                R = _aligned(R, a_t)  # the nearest orientation that points along a_t: no roll to chase
+            frame.set_target(pin.SE3(R, pos))
+            posture.set_target(conf.q if anchor is None else anchor)
+            dq = pink.solve_ik(conf, tasks, 1.0, solver="daqp", limits=limits, damping=1e-8)
+            conf.integrate_inplace(dq, 1.0)
+            if float(np.max(np.abs(dq))) < 1e-5:
+                return
+
+
+def _aligned(R: np.ndarray, a: np.ndarray) -> np.ndarray:
+    """`R` turned by the smallest rotation that makes its z axis point along `a`."""
+    axis = np.cross(R[:, 2], a)
+    s, c = float(np.linalg.norm(axis)), float(R[:, 2] @ a)
+    if s < 1e-9:
+        return R if c > 0 else axis_angle_matrix(R[:, 0], math.pi) @ R
+    return axis_angle_matrix(axis / s, math.atan2(s, c)) @ R
 
 
 def segment_distance(p1, q1, p2, q2) -> float:

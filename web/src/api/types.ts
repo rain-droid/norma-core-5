@@ -71,6 +71,20 @@ export interface CameraInfo {
   age_ms: number;
 }
 
+/** The second arm (an SO-101 on its own daemon), as this daemon relays it for the twin. */
+export interface SecondArmState {
+  robot: string | null;
+  /** URDF served through this daemon. */
+  urdf: string;
+  /** Its base in this arm's base frame, row-major 4x4; null until it has been fitted. */
+  T: number[][] | null;
+  connected: boolean;
+  torque: boolean;
+  activity: string | null;
+  joints: { id: number; name: string; q: number; q_goal: number; error: number }[];
+  gripper: { open: number; holding?: boolean } | null;
+}
+
 export interface RobotState {
   type: 'state';
   t: number;
@@ -85,6 +99,8 @@ export interface RobotState {
   gripper: GripperState;
   ee: EndEffector;
   cameras: CameraInfo[];
+  /** Absent when no second arm is configured, null while its daemon is not answering. */
+  second_arm?: SecondArmState | null;
 }
 
 interface EventBase {
@@ -124,6 +140,16 @@ export interface PlanEvent extends EventBase {
   target: PlanTarget | null;
 }
 
+/** Things on the table as the depth camera saw them: one column per cell that has something on it. */
+export interface ObstaclesEvent extends EventBase {
+  kind: 'obstacles';
+  /** Side of a cell, metres. */
+  cell: number;
+  table_z: number;
+  /** x, y of the cell's middle (base frame) and the height of what stands there above the table. */
+  boxes: [number, number, number][];
+}
+
 export interface WorldMarker {
   id: string;
   label: string;
@@ -143,6 +169,31 @@ export interface Detection {
   box: [number, number, number, number];
   point?: [number, number];
   polygon?: [number, number][];
+}
+
+/** A line drawn over a camera picture: the robot's frame, its reach, the arm as the kinematics see it. */
+export interface VisionLine {
+  label: string;
+  color: 'x' | 'y' | 'reach' | 'arm';
+  points: [number, number][];
+  arrow?: boolean;
+  joints?: boolean;
+}
+
+/** What the daemon's vision sees in one camera frame (`GET /api/camera/{name}/vision`). */
+export interface VisionFrame {
+  camera: string;
+  width: number;
+  height: number;
+  seq: number;
+  /** How long the analysis took on the daemon. */
+  ms: number;
+  layers: {
+    objects?: Detection[];
+    tags?: { label: string; polygon: [number, number][] }[];
+    frame?: VisionLine[];
+    arm?: VisionLine[];
+  };
 }
 
 export interface DetectionsEvent extends EventBase {
@@ -182,16 +233,30 @@ export interface VoiceStateEvent extends EventBase {
   state: VoiceState;
 }
 
+/** The agent's own plan for its task: **replaces** the one before; empty `steps` clears it. */
+export interface StepsEvent extends EventBase {
+  kind: 'steps';
+  title: string;
+  steps: string[];
+  /** How many steps are finished, which is also the index of the one being worked on. */
+  current: number;
+  /** The current step is the one that went wrong. */
+  failed?: boolean;
+  source?: Source | null;
+}
+
 export type RobotEvent =
   | ToolStartEvent
   | ToolEndEvent
   | PlanEvent
+  | ObstaclesEvent
   | MarkersEvent
   | DetectionsEvent
   | LogEvent
   | ChatEvent
   | SpeechEvent
-  | VoiceStateEvent;
+  | VoiceStateEvent
+  | StepsEvent;
 
 export type ServerMessage = Hello | RobotState | RobotEvent;
 

@@ -1,0 +1,358 @@
+"""The one contract with the robot: joint commands out, measured state and camera frames back.
+
+The robot side is the daemon that owns the servos (`pixi run up` for the real arm, `pixi run
+sim` for a simulated one). It takes joint angles and nothing else. There are no poses, grasps
+or named skills over there: all of that is Python in this workspace, and every tool here ends
+in `Arm.joints`.
+
+    arm = Arm()
+    arm.q()                                   # seven measured joint angles, radians
+    arm.joints(q, gripper=None, speed=0.8)    # one target, or a list of waypoints
+    arm.frame("top")                          # newest camera frame, BGR
+
+What the robot side does with a command. It refuses it outside the calibrated joint limits,
+outside the clearance envelope (fingertips into the table, arm into itself, tool behind the
+base), or while a servo reports a fault. Otherwise it travels through the waypoints in straight
+joint-space segments under one trapezoidal speed profile, trims out servo droop at the end,
+and stops with an error if a joint is blocked on the way (`Arm.joints` then tries once more,
+slower, before it gives up: robot_config/motion.json says how much slower). `speed_scale` in the same file slows every move down. `check=False` skips
+the envelope;
+`allow_low=True` relaxes the daemon's floor. Neither flag bypasses this workspace's extra
+real-arm mat clearance in robot_config/motion.json, checked across every joint path and retry.
+A gripper opening of 0 is
+a grasp: the jaws close until they stall and then hold just past that point.
+
+The call returns when the motion has finished. Killing the calling process does not stop a
+motion already sent: `Arm.stop()` (tools/stop.py) does. `Arm.pace()` slows one down for a moment.
+"""
+
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+DAEMON = os.environ.get("ELROBOT_DAEMON", "http://127.0.0.1:8765")
+MOTION_CONFIG = Path(__file__).resolve().parents[2] / "robot_config" / "motion.json"
+BLOCKED_RETRY_SPEED = 0.5  # what applies when motion.json or its key is missing
+SLOWEST = 0.05  # the robot side raises any speed below this to it
+BLOCKED_PAUSE_S = 0.5  # let the arm settle where it stopped before the slower second try
+REAL_ARM_LIFT = 0.010  # model-to-real fingertip height correction, also used by the planner
+EXTRA_DESCENT_CLEARANCE = 0.015  # additional clearance after observed mat contact, 2026-11-22
+
+
+class RobotError(Exception):
+    """The robot side said no, or cannot be reached: something to act on, not a bug."""
+
+
+def extra_descent_clearance() -> float:
+    """Extra real-arm descent clearance in metres, read for every command. Fail closed on
+    invalid configuration; a missing file/key retains the conservative 15 mm default."""
+    try:
+        value = json.loads(MOTION_CONFIG.read_text()).get("extra_descent_clearance_m", EXTRA_DESCENT_CLEARANCE)
+    except FileNotFoundError:
+        return EXTRA_DESCENT_CLEARANCE
+    except (OSError, json.JSONDecodeError, AttributeError) as e:
+        raise RobotError(f"not moving: cannot read descent clearance from robot_config/motion.json: {e}") from None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or not 0 <= value <= 0.1:
+        raise RobotError("not moving: extra_descent_clearance_m must be a finite number from 0 to 0.1 metres")
+    return float(value)
+
+
+def blocked_retry_speed() -> float:
+    """The fraction of its speed at which a blocked move is sent again, from robot_config/motion.json.
+
+    `blocked_retry_speed`, 0 to 1: 0.5 is half as fast, 1 the same speed again, 0 no second try.
+    Read at the moment it is needed, so an edit applies to the next blocked move. Raises
+    ValueError for a file that cannot be read as that.
+    """
+    try:
+        text = MOTION_CONFIG.read_text()
+    except FileNotFoundError:
+        return BLOCKED_RETRY_SPEED
+    try:
+        value = json.loads(text).get("blocked_retry_speed", BLOCKED_RETRY_SPEED)
+    except (json.JSONDecodeError, AttributeError) as e:
+        raise ValueError(f"robot_config/motion.json is not a JSON object ({e})") from None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+        raise ValueError(f"robot_config/motion.json: blocked_retry_speed must be a number from 0 to 1, not {value!r}")
+    return float(value)
+
+
+def speed_scale() -> float:
+    """`speed_scale` from robot_config/motion.json: every arm move is sent at this fraction of
+    the speed its tool asked for (jaw-only commands are left alone). 1, or no such key, changes
+    nothing; 0.5 is everything at half speed, for a careful run or a demonstration people can
+    follow. Read for each command, so an edit applies to the next move. An unreadable file or a
+    value outside 0.05 to 1 counts as 1: a typo must not stop the arm."""
+    try:
+        value = json.loads(MOTION_CONFIG.read_text()).get("speed_scale", 1.0)
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return 1.0
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not SLOWEST <= value <= 1:
+        return 1.0
+    return float(value)
+
+
+def _request(path: str, body: dict | None = None, timeout: float = 10.0, raw: bool = False):
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(DAEMON + path, data=data, headers={"Content-Type": "application/json"} if data else {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            payload = r.read()
+    except urllib.error.HTTPError as e:
+        raise RobotError(f"the robot daemon answered HTTP {e.code} for {path}: {e.read().decode(errors='replace')[:200]}") from None
+    except OSError as e:
+        raise RobotError(
+            f"the robot daemon is not reachable at {DAEMON} ({e}). Start it from the repo root: "
+            "`pixi run up` (real arm) or `pixi run sim` (simulated)."
+        ) from None
+    return payload if raw else json.loads(payload)
+
+
+class Arm:
+    def __init__(self, source: str = "agent", call_id: str | None = None, log=None):
+        self.source = source  # who is commanding, for the web UI
+        self.call_id = call_id  # set when used from inside a tool, so its commands group under it
+        self.log = log  # a file that gets one JSON line per command sent
+        self.sent = 0
+        self._meta: dict | None = None
+        self._mat_kin = None
+
+    # ---- reading
+
+    def state(self) -> dict:
+        """The measured state now: joints (q in rad, limits, load, temp, error), gripper, tool pose, cameras."""
+        return _request("/api/state")
+
+    def meta(self) -> dict:
+        """What does not change while the daemon runs: mode (real/sim), table height, clearance envelope."""
+        if self._meta is None:
+            self._meta = _request("/api/meta")
+        return self._meta
+
+    def why_not_ready(self, state: dict | None = None) -> str | None:
+        s = state or self.state()
+        if not s["connected"]:
+            return "the arm is not connected (no fresh servo state): is it powered and plugged in?"
+        if not s["calibrated"]:
+            return "the arm's joints are not calibrated"
+        faulted = [j["id"] for j in s["joints"] if j["error"]]
+        if faulted:
+            return (f"servo fault on joint(s) {faulted} (status 32 = overload). Do not move: a person must hold the arm while "
+                    "torque is switched off and on again to clear it.")  # fmt: skip
+        return None
+
+    def q(self) -> np.ndarray:
+        """Seven measured arm joint angles, radians."""
+        s = self.state()
+        why = self.why_not_ready(s)
+        if why:
+            raise RobotError(why)
+        return np.array([j["q"] for j in s["joints"][:7]])
+
+    def limits(self) -> tuple[np.ndarray, np.ndarray]:
+        """Calibrated joint limits (lower, upper), radians. Narrower than the URDF's where the servo arcs are."""
+        joints = self.state()["joints"][:7]
+        return np.array([j["lower"] for j in joints]), np.array([j["upper"] for j in joints])
+
+    def frame(self, camera: str = "top", settle: float = 0.35) -> np.ndarray:
+        """Newest BGR frame from a camera, taken `settle` seconds from now so the arm is still
+        (the cameras lag by about 100 ms)."""
+        time.sleep(settle)
+        live = {c["name"]: c for c in self.state()["cameras"]}
+        if camera not in live:
+            raise RobotError(f"no camera '{camera}' (live: {sorted(live) or 'none'})")
+        if live[camera]["age_ms"] > 2000:
+            raise RobotError(f"camera '{camera}' is stale ({live[camera]['age_ms'] / 1000:.1f} s since its last frame)")
+        img = cv2.imdecode(np.frombuffer(_request(f"/api/camera/{camera}/frame.jpg", raw=True), np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            raise RobotError(f"could not decode the frame from camera '{camera}'")
+        return img
+
+    # ---- commanding
+
+    def joints(self, path=None, *, gripper: float | None = None, speed: float = 0.8, check: bool = True,
+               allow_low: bool = False, label: str = "", retry_blocked: bool = True, near_other: bool = False) -> dict:  # fmt: skip
+        """Send one joint command and wait for it to finish.
+
+        path:    seven joint angles (rad), or a list of such waypoints travelled in one move.
+        gripper: jaw opening 0..1, applied after the arm has arrived; 0 grasps.
+        Returns the measured outcome: {"joints": [7 rad], "gripper": {open, width_mm, holding}, "tcp": {pos, quat, approach}}.
+        Raises RobotError with the robot side's reason if it refuses or is blocked.
+        A move stopped as blocked is sent once more first, slower (`_again_slower`); the result
+        then carries `retried_blocked`, the first refusal. `retry_blocked=False` for a move that
+        is meant to stop on contact.
+
+        On a table with a second arm the path is first walked against that arm where it stands
+        (util/shared_space.py) and refused if any part of this arm would come within 2 cm of any
+        part of it. `near_other` lets the two grippers meet, for a hand-over; the rest still counts.
+        """
+        if path is not None and check:
+            self._mind_the_other_arm(path, near_other)
+        body: dict = {"source": self.source, "call_id": self.call_id, "label": label, "speed": speed, "check": check, "allow_low": allow_low}
+        if path is not None:
+            body["speed"] = round(max(SLOWEST, speed * speed_scale()), 4)
+            p = np.asarray(path, dtype=float)
+            body["path"] = [[round(float(v), 5) for v in q] for q in (p[None] if p.ndim == 1 else p)]
+        if gripper is not None:
+            body["gripper"] = float(gripper)
+        res = self._send(body)
+        if not res["ok"] and retry_blocked and "path" in body and (res.get("kind") == "blocked" or str(res["error"]).startswith("blocked")):
+            res = self._again_slower(body, res)
+        if not res["ok"]:
+            raise RobotError(res["error"])
+        return res
+
+    def _mind_the_other_arm(self, path, grippers_may_meet: bool) -> None:
+        """Refuse a path that would run this arm into the second arm. Does nothing where there is none:
+        in simulation, before it has been fitted, or while its daemon is not answering."""
+        root = Path(__file__).resolve().parents[2]
+        if not (root / "robot_config" / "second_arm.json").exists():
+            return
+        state = self.state()
+        if state.get("mode") != "real":
+            return
+        from util import second_arm, shared_space  # here, not at the top: they import this module
+
+        try:
+            other = second_arm.joints_now()
+        except RobotError:
+            other = None  # its daemon is not answering, or the arm is unplugged: the things on the table still count
+        p = np.asarray(path, dtype=float)
+        here = np.array([j["q"] for j in state["joints"][:7]], dtype=float)
+        space, whole = shared_space.space(root), [here, *(p[None] if p.ndim == 1 else p)]
+        why = space.path_clear("this", whole, other, grippers_may_meet=grippers_may_meet)
+        if why:
+            try:  # the way refused, drawn in the web UI's 3D view until the next move
+                points = [[round(float(v), 4) for v in space.this.fk(a + (b - a) * t)[:3, 3]] for a, b in zip(whole, whole[1:]) for t in np.linspace(0.0, 1.0, 6)]
+                _request("/api/event", {"kind": "plan", "call_id": "refused", "path": points, "target": None}, timeout=2.0)
+            except RobotError:
+                pass
+            advice = "Go over it or another way; if it has been moved since, scan again (tools/scan_obstacles.py)." if "the thing" in why else "Move the second arm away first (tools/second_arm.py), or go another way."
+            raise RobotError(f"not moving: {why}. {advice}")
+
+    def _mind_the_mat(self, path) -> None:
+        """Check the full joint-space sweep, including unchecked commands and retries.
+
+        The real fingertips extend below the model. Keep the model correction plus the
+        additional descent margin above the mat. If already below the new limit, only a
+        non-descending retreat is allowed until clear. No labels or check flags exempt a move.
+        """
+        meta = self.meta()
+        if meta.get("mode") != "real":
+            return
+        floor = float(meta["table_z"]) + REAL_ARM_LIFT + extra_descent_clearance()
+        from util.kinematics import Kinematics
+
+        if self._mat_kin is None:
+            self._mat_kin = Kinematics(Path(__file__).resolve().parents[2] / "robot_config" / "model.urdf")
+        state = self.state()
+        here = np.array([j["q"] for j in state["joints"][:7]], dtype=float)
+        p = np.asarray(path, dtype=float)
+        p = p[None] if p.ndim == 1 else p
+        if p.ndim != 2 or p.shape[1] != 7 or not np.isfinite(p).all():
+            raise RobotError("not moving: a joint path must contain seven finite angles per waypoint")
+
+        def height(q):
+            g = self._mat_kin.geometry(q)
+            return float(min(g.tips[:, 2].min(), g.tcp[2]))
+
+        previous = height(here)
+        for end in p:
+            # At most 0.005 rad per joint: check the swept path, not just its endpoints.
+            count = max(1, int(np.ceil(np.max(np.abs(end - here)) / 0.005)))
+            for t in np.linspace(0.0, 1.0, count + 1)[1:]:
+                low = height(here + (end - here) * t)
+                required = min(floor, previous)  # permit an upward recovery from below the floor
+                if low < required - 1e-6:
+                    raise RobotError(
+                        f"not moving: descent would violate the extra mat clearance "
+                        f"(modelled fingertip {1000 * (low - meta['table_z']):.1f} mm above the mat; "
+                        f"minimum {1000 * (floor - meta['table_z']):.1f} mm). "
+                        "Use a higher target; check=false and allow_low=true do not bypass this limit."
+                    )
+                previous = max(previous, low) if previous < floor else low
+            here = end
+
+    def _send(self, body: dict) -> dict:
+        if "path" in body:
+            self._mind_the_mat(body["path"])
+        res = _request("/api/joints", body, timeout=300.0)
+        self.sent += 1
+        if self.log is not None:
+            sent = {k: body[k] for k in ("label", "path", "gripper", "speed", "check", "allow_low") if k in body}
+            with open(self.log, "a") as f:
+                f.write(json.dumps({"t": round(time.time(), 3), **sent, "outcome": "done" if res["ok"] else res["error"]}) + "\n")
+        return res
+
+    def _again_slower(self, body: dict, refused: dict) -> dict:
+        """A move stopped as blocked, sent once more from where the arm stopped, at
+        `blocked_retry_speed()` times its speed (robot_config/motion.json; half, unless changed).
+
+        On this arm most "blocked" refusals are a joint trailing a fast setpoint with nothing in
+        the way, and the same move goes through slower. If something really is in the way the
+        slower move is stopped as blocked too, and that second refusal is the one raised. Not
+        tried when the arm cannot be used (a servo fault, not connected) or the config says 0:
+        then the first refusal stands. With a config that cannot be read the first refusal
+        stands too, and says why there was no second try.
+        """
+        try:
+            factor = blocked_retry_speed()
+        except ValueError as e:
+            return {**refused, "error": f"{refused['error']} Not tried again slower: {e}."}
+        if factor == 0:
+            return refused
+        try:
+            state = self.state()
+            if self.why_not_ready(state):
+                return refused
+            now = np.array([j["q"] for j in state["joints"][:7]])
+        except (RobotError, KeyError, IndexError, TypeError):
+            return refused
+        path = np.asarray(body["path"], dtype=float)
+        rest = path[int(np.argmin(np.linalg.norm(path - now, axis=1))):]  # the waypoints still ahead: not back to the start of the line
+        time.sleep(BLOCKED_PAUSE_S)
+        speed = round(max(SLOWEST, body["speed"] * factor), 4)
+        res = self._send({**body, "path": rest.tolist(), "speed": speed, "label": (body["label"] + " (again, slower)").strip()})
+        if res["ok"]:
+            res["retried_blocked"] = refused["error"]
+        return res
+
+    def torque(self, enable: bool) -> None:
+        """Switch every servo's torque. Off lets the arm go limp: it drops unless it is resting on something."""
+        res = _request("/api/torque", {"enable": bool(enable)})
+        if not res.get("ok"):
+            raise RobotError(res.get("error") or "the torque command was refused")
+        for _ in range(30):  # the servos report the change a moment later
+            if self.state()["torque"] == bool(enable):
+                return
+            time.sleep(0.05)
+
+    def stop(self) -> None:
+        """Halt any motion now and hold position. Always allowed."""
+        _request("/api/stop", {})
+
+    def pace(self, scale: float, hold_s: float = 0.5) -> None:
+        """Run motions at `scale` (0.05..1) of their planned speed for the next `hold_s` seconds.
+        It wears off by itself: keep calling to keep the arm slow."""
+        _request("/api/pace", {"scale": scale, "hold_s": hold_s}, timeout=2.0)
+
+    def guide(self, seconds: float = 30.0) -> dict:
+        """Let a person lead the arm by hand for up to `seconds`. Returns `path` (the joint
+        waypoints it was taken through, start included), `moved` and why it `ended`."""
+        res = _request("/api/guide", {"seconds": seconds, "source": self.source}, timeout=seconds + 15.0)
+        if not res.get("ok"):
+            raise RobotError(res.get("error", "hand-guiding failed"))
+        return res
+
+    def emit(self, kind: str, **fields) -> None:
+        """Show something in the web UI (timeline entries, markers, detections). Display only."""
+        try:
+            _request("/api/event", {"kind": kind, **fields}, timeout=2.0)
+        except RobotError:
+            pass

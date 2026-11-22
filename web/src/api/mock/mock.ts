@@ -697,6 +697,7 @@ export class MockTransport implements Transport {
       this.objects = makeObjects();
       this.holding = null;
       this.emit({ kind: 'markers', markers: [] });
+      this.emit({ kind: 'steps', title: '', steps: [], current: 0 });
       this.voice('idle');
       await this.sleep(my, 1800);
 
@@ -712,15 +713,24 @@ export class MockTransport implements Transport {
       // 2. Voice: pick and place, with one honest miss.
       turn = await this.hear(my, 'put the block in the cup');
       text = await this.say(my, turn, '', 'bet.', false);
+      const plan = ['pick up the red block', 'set it in the paper cup', 'go back to the ready pose'];
+      const step = (current: number, failed = false) =>
+        this.emit({ kind: 'steps', title: 'Block into the cup', steps: plan, current, failed, source: 'voice' });
+      step(0);
       this.voice('acting');
       await this.runTool(my, 'voice', 'pick', { object: 'red block', _miss: true });
+      step(0, true);
       text = await this.say(my, turn, text, 'oh shit, I messed up. lemme try again.', false);
+      step(0);
       this.voice('acting');
       await this.runTool(my, 'voice', 'pick', { object: 'red block' });
       text = await this.say(my, turn, text, 'got it this time.', false);
+      step(1);
       this.voice('acting');
       await this.runTool(my, 'voice', 'place', { target: 'paper cup' });
+      step(2);
       await this.runTool(my, 'voice', 'home', {});
+      step(3);
       await this.say(my, turn, text, "boom. block's in the cup.", true);
       this.voice('idle');
       await this.sleep(my, 2600);
@@ -874,5 +884,10 @@ export class MockTransport implements Transport {
         paintCamera(ctx, this.objects, pose.pos, pose.approach, this.grip, 0);
       },
     };
+  }
+
+  /** The demo has no vision of its own; the panel shows what the pretend tools report. */
+  vision(_name: string): Promise<null> {
+    return Promise.resolve(null);
   }
 }
