@@ -140,7 +140,8 @@ class CameraModel:
     @classmethod
     def load(cls, path: Path) -> "CameraModel":
         if path.exists():
-            return cls(**json.loads(path.read_text()))
+            known = cls.__dataclass_fields__  # the calibration script's file also has fields for a room-fixed camera
+            return cls(**{k: v for k, v in json.loads(path.read_text()).items() if k in known})
         return cls()
 
     def save(self, path: Path) -> None:
