@@ -409,6 +409,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         await hub.stop()
         return {"ok": True}
 
+    @app.post("/api/pace")
+    async def pace(request: Request):
+        """Slow motions down for a moment (docs/API.md). Never speeds one up beyond what it was sent with."""
+        body = await request.json()
+        try:
+            scale = hub.robot.set_pace(body["scale"], body.get("hold_s", 0.5))
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, 'body must be {"scale": 0.05..1, "hold_s": seconds}') from None
+        return {"ok": True, "pace": scale}
+
     @app.post("/api/torque")
     async def torque(request: Request):
         body = await request.json()

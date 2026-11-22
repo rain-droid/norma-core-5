@@ -4,14 +4,14 @@
 7 cm back along the approach, descend in a straight line, close until the jaws stall, lift.
 What this adds is that it keeps reading the tracker while it works:
 
-* it waits until the table is quiet (nothing moving that the arm did not move) and the object
-  is lying still;
+* it waits until the object is in view and lying still;
 * it aims at where the object is then, with the jaws across its flat sides;
 * at the hover point it asks whether the object has been moved since, and if so aims again
   instead of descending;
-* if the tracker stops the arm because something moved on the table (a hand, most likely), it
-  waits for quiet and starts over from where the object is now. Being stopped does not count
-  against `attempts`;
+* while something moves on the table that the arm did not move (a hand, most likely), the
+  tracker slows the arm down and it carries on. A tracker set to stop instead
+  (track_objects `on_intrusion: "stop"`) halts it: then this waits for quiet and starts over
+  from where the object is now, which does not count against `attempts`;
 * if the jaws close on nothing, or the object slips out while lifting, it looks and tries again;
 * if the grasp is refused because leaning, turned jaws would dip a fingertip into the table,
   it grasps 5 mm higher, and then with the jaws unturned.

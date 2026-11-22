@@ -74,4 +74,4 @@ proportional mapping NormaCore's viewer uses.
 
 **Angles in tool arguments carry their unit** (`yaw_deg`, `pitch_deg`); everything else is metres and radians.
 
-**The tracker's intrusion stop is a motion heuristic, not a safety interlock.** It is never to be disabled automatically.
+**The tracker's reaction to an intrusion is a motion heuristic, not a safety interlock.** By default it slows the arm to a quarter of its speed while something else moves on the table and lets it return to full speed afterwards (the operator's choice, 2026-11-22: a stop for every hand at the edge of the mat made tasks fail); `on_intrusion: "stop"` halts it as before. It is never to be switched to `ignore` automatically.

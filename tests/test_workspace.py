@@ -218,7 +218,7 @@ def test_a_hand_in_the_work_area_stops_the_arm_and_the_pick_resumes(robot):
 
     _, world = robot
     blocks = arrange(world)
-    run("track_objects")
+    assert run("track_objects", on_intrusion="stop")["on_intrusion"] == "stop"
 
     def reach_in():
         world.hand = Block("hand", np.array([0.27, 0.33]), (0.26, 0.10), 0.03, (120, 60, 30))
@@ -227,10 +227,43 @@ def test_a_hand_in_the_work_area_stops_the_arm_and_the_pick_resumes(robot):
         world.hand = None
 
     when(doing("reaching"), reach_in)
-    picked = run("pick_object", object="red-1")
+    try:
+        picked = run("pick_object", object="red-1")
+        stopped_t = tracker.read()["stopped_arm_t"]
+    finally:
+        run("track_objects", on_intrusion="slow")  # a new tracker: the default for the tests that follow
     assert picked.get("holding") and world.held is blocks["red"], picked
     assert any("stopped" in step for step in picked["tried"]), picked
-    assert tracker.read()["stopped_arm_t"], "the tracker is what stopped it"
+    assert stopped_t, "the tracker is what stopped it"
+
+
+def test_a_hand_in_the_work_area_slows_the_arm_and_it_speeds_up_again(robot):
+    from elrobot.simworld import Block
+    from util import tracker
+    from util.arm import Arm
+
+    _, world = robot
+    arrange(world)
+    assert run("track_objects")["on_intrusion"] == "slow"
+    paces = []
+
+    def reach_in():
+        world.hand = Block("hand", np.array([0.27, 0.33]), (0.26, 0.10), 0.03, (120, 60, 30))
+        for _ in range(15):
+            time.sleep(0.1)
+            paces.append(Arm().state()["pace"])
+        world.hand = None
+
+    hand = when(doing("reaching"), reach_in)
+    picked = run("pick_object", object="red-1")
+    hand.join()
+    assert picked.get("holding") and not any("stopped" in step for step in picked["tried"]), picked
+    assert min(paces) == tracker.SLOW_PACE, paces
+    assert tracker.read()["slowed_arm_t"] and not tracker.read()["stopped_arm_t"]
+    deadline = time.time() + 5
+    while Arm().state()["pace"] < 1.0 and time.time() < deadline:
+        time.sleep(0.1)
+    assert Arm().state()["pace"] == 1.0, "full speed again once the table is quiet"
 
 
 def test_a_stack_is_checked_and_an_object_that_fell_off_is_put_back(robot):

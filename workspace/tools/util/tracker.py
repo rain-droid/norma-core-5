@@ -4,7 +4,7 @@ Every other tool here runs and exits. This is the one process that stays. Ten ti
 it looks at the top camera with the same eyes as tools/find_objects.py and rewrites
 perception/exteroception/tracks.json (and tracks.jpg, the view with each track outlined):
 
-    {"t": ..., "clear_s": 12.3, "intrusion": null, "holding": null, "stopped_arm_t": null,
+    {"t": ..., "clear_s": 12.3, "intrusion": null, "holding": null, "slowed_arm_t": null,
      "tracks": [{"id": "red-1", "state": "visible", "x": 0.071, "y": 0.199, "yaw_deg": -90,
                  "width_mm": 25, "height_mm": 25, "still_s": 31.0, "seen_s": 0.0, "on": null}]}
 
@@ -19,13 +19,17 @@ turns up somewhere else after being out of sight is recognised by its colour.
 `intrusion` is set while something is moving on the table that the arm did not move: a thing
 coming in over the edge of the searched area, something new appearing, a tracked object
 sliding. That is what a hand looks like from here. It stays set until the table has been
-quiet for a second and a half. While it is set the tracker stops any arm motion
-(`stopped_arm_t`), unless it was started with --no-stop. `clear_s` is how long it has been
-quiet. A thing that lies still is not an intrusion, whatever it is: one lying across the edge
+quiet for a second and a half. `clear_s` is how long it has been quiet. What the tracker does
+to an arm that is moving while it is set is its `on_intrusion`:
+  slow    (the default) the motion carries on at a quarter of its speed (SLOW_PACE) and returns
+          to full speed once the table is quiet again (`slowed_arm_t`)
+  stop    the motion is halted (`stopped_arm_t`); the tool that sent it waits for quiet and
+          starts again
+  ignore  nothing A thing that lies still is not an intrusion, whatever it is: one lying across the edge
 is listed under `at_edge`, where it cannot be measured or picked by name.
 
 The image and report that last raised an intrusion are kept as intrusion.jpg and
-intrusion.json beside tracks.json, so a stopped tool can show what triggered it.
+intrusion.json beside tracks.json, so a slowed or stopped tool can show what triggered it.
 This is a motion heuristic, not a person detector or safety interlock: stationary hands,
 occluded regions and table-coloured objects can be missed.
 
@@ -55,7 +59,9 @@ from util.arm import Arm, RobotError
 ROOT = Path(__file__).resolve().parents[2]
 FILE = ROOT / "perception" / "exteroception" / "tracks.json"
 RUNTIME = ROOT / ".runtime"
-NO_STOP = RUNTIME / "tracker_does_not_stop_the_arm"  # exists while someone has switched the stopping off
+REACTION = RUNTIME / "tracker_on_intrusion"  # holds "stop" or "ignore" while someone has chosen that over the default
+REACTIONS = ("slow", "stop", "ignore")
+SLOW_PACE = 0.25  # fraction of its speed the arm keeps while something else moves on the table
 
 PERIOD = 0.1  # seconds between looks
 SAME_SPOT = 12  # pixels: an outline centred this close to a track's is that object, whatever its colour reads as
@@ -106,12 +112,13 @@ class Watcher:
         self.intrusion: dict | None = None
         self.clear_since = time.time()
         self.stopped_arm_t: float | None = None
+        self.slowed_arm_t: float | None = None
         self.holding: str | None = None  # id of the track in the gripper; "" for something that was never a track
         self.shown = ""
 
     # ---- one look
 
-    def look(self, stop_on_intrusion: bool = True) -> tuple[dict, np.ndarray]:
+    def look(self, on_intrusion: str = "slow") -> tuple[dict, np.ndarray]:
         now = time.time()
         state = self.arm.state()
         if state["mode"] != self.mode:
@@ -162,7 +169,7 @@ class Watcher:
         self._edge(across)
         self._match(seen, near, [list(b.box) for b in across], now)
         self._gripper(gripping, tcp, now)
-        self._intrusion(state, now, stop_on_intrusion)
+        self._intrusion(state, now, on_intrusion)
         self.tracks = [t for t in self.tracks if not (t["state"] == "missing" and now - t["seen_t"] > FORGET_S)]
         return self._report(now), self._picture(img)
 
@@ -188,7 +195,7 @@ class Watcher:
         if not self.by_arm[min(max(v, 0), self.by_arm.shape[0] - 1), min(max(u, 0), self.by_arm.shape[1] - 1)]:
             self.news.append((what, proof, [u, v]))
 
-    def _intrusion(self, state, now, stop_on_intrusion) -> None:
+    def _intrusion(self, state, now, on_intrusion) -> None:
         self.news_looks = self.news_looks + 1 if self.news else 0
         if self.news and (self.news_looks >= NEWS_LOOKS or any(proof for _, proof, _ in self.news)):
             self.news_t = now
@@ -201,7 +208,20 @@ class Watcher:
             self.intrusion.update(what=what, pixel=pixel)
         elif self.intrusion and now - self.news_t > QUIET_S:
             self.intrusion, self.clear_since = None, now
-        if self.intrusion and stop_on_intrusion and state["busy"]:
+        if self.intrusion and on_intrusion == "slow":
+            # asked again at every look, also between two motions so the next one starts slow;
+            # it wears off half a second after the last look that saw an intrusion
+            try:
+                self.arm.pace(SLOW_PACE, 0.5)
+                if state["busy"]:
+                    self.slowed_arm_t = round(now, 2)
+            except RobotError as e:
+                if "HTTP 404" not in str(e) and "HTTP 405" not in str(e):
+                    raise
+                if state["busy"]:  # a robot side from before it could be slowed: stopping is what is left
+                    self.arm.stop()
+                    self.stopped_arm_t = round(now, 2)
+        elif self.intrusion and on_intrusion == "stop" and state["busy"]:
             self.arm.stop()
             self.stopped_arm_t = round(now, 2)
 
@@ -343,6 +363,7 @@ class Watcher:
             "intrusion": self.intrusion,
             "holding": self.holding,
             "stopped_arm_t": self.stopped_arm_t,
+            "slowed_arm_t": self.slowed_arm_t,
             "tracks": tracks,
             "at_edge": [dict(zip("xy", (round(float(c), 3) for c in self.cam.to_base(e["cx"], e["cy"])[:2])), area_px=round(e["area"])) for e in lying],
         }
@@ -387,7 +408,7 @@ def main() -> None:
     lock.write(str(os.getpid()))
     lock.flush()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    stop_on_intrusion = "--no-stop" not in sys.argv
+    on_intrusion = reaction()
     FILE.parent.mkdir(parents=True, exist_ok=True)
     arm = Arm(source="tracker")
     watcher, failing_since, n, intrusion_since = None, None, 0, None
@@ -396,14 +417,14 @@ def main() -> None:
             t0 = time.time()
             try:
                 watcher = watcher or Watcher(arm)
-                report, picture = watcher.look(stop_on_intrusion)
+                report, picture = watcher.look(on_intrusion)
                 failing_since = None
             except RobotError as e:  # no frame, no arm, no calibration: say so, and keep trying while the robot side is there
                 failing_since = failing_since or t0
                 if "not reachable" in str(e) and t0 - failing_since > 5.0:
                     raise SystemExit(f"the robot side is gone: {e}") from None
-                report, picture = {"t": round(t0, 3), "error": str(e), "clear_s": 0.0, "intrusion": None, "holding": None, "stopped_arm_t": None, "tracks": [], "at_edge": []}, None
-            report["stops_arm_on_intrusion"] = stop_on_intrusion
+                report, picture = {"t": round(t0, 3), "error": str(e), "clear_s": 0.0, "intrusion": None, "holding": None, "stopped_arm_t": None, "slowed_arm_t": None, "tracks": [], "at_edge": []}, None
+            report["on_intrusion"] = on_intrusion
             _write(FILE, (json.dumps(report, indent=1) + "\n").encode())
             if picture is not None and report["intrusion"] and report["intrusion"]["since"] != intrusion_since:
                 intrusion_since = report["intrusion"]["since"]
@@ -421,6 +442,15 @@ def main() -> None:
 # --------------------------------------------------------------------------- for tools: reading it
 
 
+def reaction() -> str:
+    """What a tracker started now does to a moving arm on an intrusion: slow, stop or ignore."""
+    try:
+        chosen = REACTION.read_text().strip()
+    except OSError:
+        return "slow"
+    return chosen if chosen in REACTIONS else "slow"
+
+
 def read() -> dict | None:
     """The newest tracks, or None if no tracker is running."""
     try:
@@ -436,7 +466,7 @@ def start() -> dict:
     if data is None:
         RUNTIME.mkdir(exist_ok=True)
         with open(RUNTIME / "tracker.log", "ab") as log:
-            subprocess.Popen([sys.executable, "-m", "util.tracker", *(["--no-stop"] if NO_STOP.exists() else [])], cwd=ROOT / "tools",
+            subprocess.Popen([sys.executable, "-m", "util.tracker"], cwd=ROOT / "tools",
                              stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)  # fmt: skip
         deadline = time.time() + 15.0
         while data is None and time.time() < deadline:
@@ -510,11 +540,13 @@ def wait_for(ctx, name: str | None = None, patience: float = 25.0, still: float 
     """Wait until the table is quiet (nothing moving that the arm did not move) and, if `name`
     is given, that object is in view and lying still; returns its track. If it stays out of
     sight, the arm gets out of the way (uncover), in case the arm is what hides it. Gives up
-    with the reason after `patience` seconds. A tracker told not to stop the arm is not waited on for quiet."""
+    with the reason after `patience` seconds. Quiet is only waited for under a tracker that
+    stops the arm: one that slows it lets the work go on, and what has to hold still then is
+    the object being aimed at."""
     deadline, unseen_since, steps, why = time.time() + patience, None, 0, ""
     while time.time() < deadline:
         data = fresh()
-        if data["stops_arm_on_intrusion"] and (data["intrusion"] or data["clear_s"] < 0.3):
+        if data["on_intrusion"] == "stop" and (data["intrusion"] or data["clear_s"] < 0.3):
             why, unseen_since = f"the work area is not quiet ({(data['intrusion'] or {}).get('what', 'something just moved')}): a hand?", None
             continue
         if name is None:

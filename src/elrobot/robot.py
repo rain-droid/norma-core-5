@@ -92,6 +92,11 @@ class ContactGuard:
         return None
 
 
+PACE_MIN = 0.05  # the slowest a motion can be asked to run, as a fraction of its planned speed
+PACE_RAMP_S = 0.3  # seconds to go from full speed to standstill pace or back
+PACE_HOLD_MAX_S = 5.0  # the longest one request for a slower pace lasts
+
+
 class Robot:
     def __init__(self, link: Link, cfg: Config):
         self.link = link
@@ -104,6 +109,8 @@ class Robot:
 
         self._motion = asyncio.Lock()
         self._stop_evt = asyncio.Event()
+        self._pace = 1.0  # fraction of the planned speed that motions run at, while _pace_until lies ahead
+        self._pace_until = 0.0
         self._cmd_q: np.ndarray | None = None  # last desired arm angles
         self._bias = np.zeros(7)  # added to the desired angles to cancel servo droop
         self._grip_goal: float | None = None
@@ -194,6 +201,7 @@ class Robot:
             "calibrated": False,
             "torque": False,
             "busy": self._motion.locked(),
+            "pace": self.pace,
             "activity": self.activity,
             "source": self.source,
             "joints": [],
@@ -357,6 +365,19 @@ class Robot:
         self._bias[:] = 0.0
         self.holding = False
 
+    @property
+    def pace(self) -> float:
+        """The fraction of its planned speed a motion runs at now: 1.0 unless someone asked for less."""
+        return self._pace if time.monotonic() < self._pace_until else 1.0
+
+    def set_pace(self, scale: float, hold_s: float = 0.5) -> float:
+        """Run motions at `scale` of their planned speed for the next `hold_s` seconds. Whoever
+        wants the arm slow keeps asking; when they stop asking (or die) it returns to full speed
+        by itself. A motion under way changes speed smoothly (PACE_RAMP_S) along the same path."""
+        self._pace = min(1.0, max(PACE_MIN, float(scale)))
+        self._pace_until = time.monotonic() + min(PACE_HOLD_MAX_S, max(0.0, float(hold_s)))
+        return self._pace
+
     async def stop(self) -> None:
         """Halt any motion now and hold position."""
         self._stop_evt.set()
@@ -384,9 +405,11 @@ class Robot:
         t0 = time.monotonic()
         lag_since: float | None = None
         tick_n = 0
+        t, rate, last = 0.0, self.pace, t0  # t is time along the trajectory: it runs slower than the clock while the pace is below 1
         while True:
             now = time.monotonic()
-            t = now - t0
+            rate += min(max(self.pace - rate, -(now - last) / PACE_RAMP_S), (now - last) / PACE_RAMP_S)
+            t, last = t + rate * (now - last), now
             if self._stop_evt.is_set():
                 await self._hold_here()
                 raise Stopped("stopped")
