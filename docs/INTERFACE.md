@@ -162,6 +162,8 @@ bus:device and change when replugged (`scripts/probe.py` prints them). Frames ar
 | `perception/latest.json`, `perception/exteroception/{top,wrist}/rgb.jpg`, `perception/proprioception/state.json` | daemon, twice a second | newest state and frames |
 | `perception/exteroception/objects.json` | `find_objects` | last object listing |
 | `perception/exteroception/tracks.json`, `tracks.jpg`, `intrusion.*` | the tracker process | live tracks and the last alarm |
+| `robot_config/motion.json` | people | `safe_mode` (straight down and straight lines only), `carry_height`, `blocked_retry_speed` |
+| `state/world.json` | `describe_objects`, `name_objects`, `grasp_object`, `put_object` | the world model: objects by key and name, place, shape, state, history |
 | `state/chess.json` | chess tools | board corners, heights, moves, appearance model |
 | `state/drawing.json` | drawing tools | strokes, sheet corners, pen offset, progress |
 | `.runtime/active_skill` | `activate_skill` | the skill in use |
@@ -182,15 +184,19 @@ Signatures as of 2026-11-22; `--schema` on a tool is always current.
 | `chess_see` | `record: bool = True, close_up: str \| None = None` | Look at the chessboard: find the move the human just played, and show the board. |
 | `chess_setup` | `king_height: float, image_id: str \| None = None, corners_px: list \| None = None, corners_xy: list \| None = None, board_height: float = 0.0, robot_color: str = 'black', fen: str \| None = None, captured_side: str \| None = None, snap: bool = True` | Tell the workspace where the chessboard is and start a game from the position on it. |
 | `close_gripper` | - | Close the jaws on whatever is between them and report whether something stopped them. |
+| `create_skill` | `name: str, description: str, steps: str, calls: int = 12, replace: bool = False` | Write a new skill from a task you have just worked out, so the next session starts from it. |
 | `deactivate_skill` | - | End the skill in use, when its task is finished or abandoned. |
+| `describe_objects` | `max_objects: int = 8` | Look at the table and say what is on it: a numbered picture sheet for you to name the objects from. |
 | `draw_pen` | `corners: list \| None = None, grip: bool = False, release: bool = False, seat_height: float = 0.05` | Say where the sheet of paper is, and take hold of the pen so its tip is known. |
 | `draw_plan` | `image_path: str \| None = None, image_id: str \| None = None, quad_px: list \| None = None, strokes: list \| None = None, invert: bool = False, detail: float = 0.004` | Decide what to draw: turn a picture into pen strokes, or take strokes you wrote yourself. |
 | `draw_run` | `margin: float = 0.015, pen_up: float = 0.015, press: float = 0.001, speed: float = 0.3, first_stroke: int = 0, dry_run: bool = False` | Draw the planned strokes on the sheet with the pen in the gripper. |
 | `find_objects` | `camera: str = 'top', max_objects: int = 8` | Outline, number and locate whatever stands out on the table, seen by a camera. |
+| `grasp_object` | `object: str, attempts: int = 2, grasp_height: float \| None = None` | Pick up an object by name: "the ring", "blue cube", or its key. |
 | `home` | `speed: float = 0.5` | Go to the ready pose: gripper over the table in front of the base, pointing down and forward. |
 | `joint_command` | `joints=None, gripper: float \| None = None, speed: float = 0.8, check: bool = True, allow_low: bool = False` | The atomic action, and the only thing the robot understands: joint angles. |
 | `look_at_table` | `x: float = 0.0, y: float = 0.14, height: float = 0.09, pitch_deg: float = 80.0, speed: float = 0.8` | Bring the wrist camera over a spot on the table for a close look, and capture what it sees. |
 | `move_tcp` | `x: float, y: float, z: float, pitch_deg: float \| None = None, yaw_deg: float \| None = None, straight: bool = False, speed: float = 0.8, allow_low: bool = False` | Move the tool point (the spot between the fingertips) to x, y, z. |
+| `name_objects` | `names: dict \| None = None, forget: list \| None = None` | Write down what the objects are, after looking at describe_objects' picture sheet. |
 | `open_gripper` | `fraction: float = 1.0` | Open the jaws to `fraction` of full travel: 1 = fully open (53 mm), just above 0 = nearly shut. |
 | `pick_at` | `x: float, y: float, yaw_deg: float \| None = None, grasp_height: float = 0.022, refine: bool = False` | Pick up the object at table position x, y: the whole grasp, built from joint commands. |
 | `pick_object` | `object: str, grasp_height: float \| None = None, attempts: int = 4` | Pick up a tracked object by name, wherever it is by the time the gripper gets there. |
@@ -199,11 +205,13 @@ Signatures as of 2026-11-22; `--schema` on a tool is always current.
 | `place_at` | `x: float, y: float, z: float = 0.0, yaw_deg: float \| None = None` | Put down what the gripper holds at table position x, y, then back away. |
 | `place_object` | `object: str = '', on: str = '', x: float \| None = None, y: float \| None = None, z: float \| None = None, yaw_deg: float \| None = None, attempts: int = 4, retries: int = 1` | Put what the gripper holds onto a tracked object, or at x, y, and check where it ended up. |
 | `plan_grasp` | `object: str \| int \| None = None, x: float \| None = None, y: float \| None = None, footprint_mm: list \| None = None, yaw_deg: float = 0.0, height_mm: float \| None = None, obstacles: list \| None = None, pick: bool = False, attempts: int = 3` | Work out the best way to grasp an object, considering what stands around it; optionally do it. |
+| `put_object` | `on: str \| None = None, x: float \| None = None, y: float \| None = None, yaw_deg: float = 0.0` | Put down what the gripper holds: onto a named object, or at a place. |
 | `read_proprioception` | - | Report the measured robot state and draw the body's current posture. |
 | `rest` | - | Fold the arm into its resting seat and switch the motors off. |
 | `show_steps` | `steps: list \| None = None, current: int = 0, title: str = '', failed: bool = False` | Show the people watching what you are doing and what comes next. |
 | `stop` | - | Halt all motion now and hold position. Always allowed, even while another tool is running. |
 | `track_objects` | `action: str = 'read', on_intrusion: str \| None = None` | Live tracking of what is on the table: read it, and start or stop it. |
+| `world_model` | `look: bool = False, object: str \| None = None, reset: bool = False` | Read the world model: what is on the table by name, where, and what has been done with it. |
 
 ## Testing without a robot
 

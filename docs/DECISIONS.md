@@ -6,6 +6,36 @@ from commit messages, `CLAUDE.md` and `workspace/AGENTS.md`, not witnessed.
 
 ## 2026-11-22
 
+**Safe mode trades reach for predictability.** With it on, the gripper only points straight down and only
+travels in straight lines, so nothing swings through the space above the table and a person can see where it
+will go. It is enforced where every tool ends, in `Arm.joints` (`util/arm.py`): a single target is replaced by
+an up, across, down route or refused, so tools written later, and scripts the agent writes, obey it without
+knowing about it. The cost is large and worth stating: straight down, this arm works in an area of about
+32 by 12 cm and no higher than 7 cm, against 36 cm of reach when it may lean; objects beyond that are refused,
+not attempted, and a carried object clears only about 4 cm. Two moves are not lines, both in the air: getting
+up from and sitting down on the resting seat, and reaching the straight-down posture from a pose that is not.
+Chess (`turn_aside`, leaning grasps at the far ranks) does not work with it on.
+
+**The chat box and the microphone drive the workspace agent, not a second tool set.** There were two agents: the
+workspace one (top camera, calibration, names, checks) and the voice one, which only saw the daemon's older
+wrist-camera tools. A person typing "pick up the ring" in the web UI should get the same harness as the terminal
+does, so the voice agent now runs in `workspace/` with a shell, `AGENTS.md` and the skills. Cost: a turn is
+slower than a single MCP call, and it spends more tokens.
+
+**Three languages, decided per utterance and per sentence.** Speech to text chooses among the configured
+languages only, because unrestricted detection on a two-word command wanders off into languages nobody here
+speaks. The reply's voice is chosen sentence by sentence from the words themselves, falling back to the language
+the person last used, since the voice model has to be told its language up front. The multilingual voice model
+is licensed for non-commercial use only (CC BY-NC): fine for the hackathon, to be replaced or licensed before
+anything is sold. Cost: multilingual recognition takes about 1.4 s an utterance on this laptop against 0.8 s
+for English alone; `ELROBOT_LANGUAGES=en` goes back.
+
+**That agent's commands are judged by a fixed rule, because nobody is there to approve them.** One Python file
+from the workspace per command, through the workspace's interpreter; no pipes, chaining, redirection or
+substitution; writing only inside the workspace and not its calibration; reading only inside the repository.
+Scripts it writes itself can be run: that is how it does what no tool does (code as policy), and it means the
+rule limits accidents, not a determined misuse. Do not expose the daemon beyond this machine.
+
 **The web UI's live vision is worked out by the daemon, on request, and is for display only.** The camera
 panel asks `GET /api/camera/{name}/vision` a few times a second while a live layer is switched on; nothing is
 computed when nobody is looking, and the result is cached per frame. It draws object outlines, AprilTags, the

@@ -42,13 +42,16 @@ remains" first, then drawing on real paper (requirement 1 still holds with sort 
 
 ### Must have
 
-- [ ] **Name objects by what they are.** A tool that makes one numbered sheet of close-up crops (top and wrist
+- [x] **Name objects by what they are.** Done: `describe_objects`, `name_objects`. Was: A tool that makes one numbered sheet of close-up crops (top and wrist
       cameras); the agent names each ("blue cube", "rubber ring") and the names are stored. About 1 h.
-- [ ] **World model** (`state/world.json`) above the tracker: name and class, height, graspable width, shape,
+- [x] **World model** (`state/world.json`), done with `world_model`, `grasp_object`, `put_object`; simulator only for the motion. Was: above the tracker: name and class, height, graspable width, shape,
       relations (on, in, next to), and what was tried on each object with its outcome. About 1.5 h.
+- [ ] **Try safe mode on the real arm:** `home`, then pick and place a cube inside the straight-down area
+      (within 16 cm either side of the base, 12 to 24 cm in front). The objects now on the table at y > 0.26
+      will be refused as too far: that is the intended behaviour, move them closer.
 - [ ] **Re-run `track_objects`, `pick_object`, `place_object` on the real arm** with the new top camera and the
       refitted `base_in_mat`. Needed for requirement 3. About 20 min.
-- [ ] **`create_skill` tool** and a line in `workspace/AGENTS.md` telling the agent to write a skill after a task
+- [x] **`create_skill` tool** (done) and a line in `workspace/AGENTS.md` telling the agent to write a skill after a task
       it had no skill for. Requirement 4. About 30 min.
 - [ ] **`record_demo` / `replay_demo`**: torque off, a person moves the arm, joint angles and jaw are recorded;
       replay as joint commands. Requirement 6. About 1.5 h.
@@ -61,7 +64,7 @@ remains" first, then drawing on real paper (requirement 1 still holds with sort 
 
 - [ ] **Drawing on real paper** (`draw_plan`, `draw_pen`, `draw_run`): simulator only so far. Expect to tune
       `press`. About 2 h. Requirement 1.
-- [ ] **Rings and hollow objects:** notice the hole and grip the rim, so a rubber ring is not grasped at its
+- [ ] **Rings and hollow objects** (detection and rim grip written; **try `grasp_object` "the ring" on the real arm**): notice the hole and grip the rim, so a rubber ring is not grasped at its
       empty centre. Small, once objects have a shape in the world model.
 - [ ] **Merge `idea-1-arav` into `main`** (or agree which branch is submitted).
 
@@ -84,6 +87,9 @@ remains" first, then drawing on real paper (requirement 1 still holds with sort 
 - [x] `pick_verified`: wrist camera checks before and after; blue cube picked three times on the real arm
 - [x] `scripts/cameras_ready.sh`
 - [x] Docs: FEATURES, DECISIONS, INTERFACE, this plan
+- [x] Chat box and microphone drive the workspace agent; speech in and out on Linux (Parakeet v3, Phonon);
+      English, French and German
+- [x] Safe mode: straight-down grasps, straight-line travel, too-far objects refused (simulator only so far)
 - [x] Web UI camera panel: switch between all cameras; live layers for objects, tags, robot frame, arm, tool results
 - [x] A blocked move is tried once more, slower (`blocked_retry_speed` in `workspace/robot_config/motion.json`,
       default 0.5); tests in `workspace/tests`. Not yet seen on the real arm
@@ -96,3 +102,8 @@ remains" first, then drawing on real paper (requirement 1 still holds with sort 
 - A servo overload (status 32) needs a person to hold the arm while torque is cycled. Keep objects 15 to 30 cm
   in front of the base: closer is refused, further is inaccurate.
 - `rest` the arm between takes; a stretched arm is hard on the shoulder servo.
+- No sound from the web UI and "Could not open the microphone", while the chat still answers in text: the
+  desktop's audio server has stalled (it did once on 2026-11-22, after the cameras were replugged and the Station
+  restarted several times). `systemctl --user restart wireplumber pipewire pipewire-pulse`, then reload the page.
+  The laptop's "Digital Microphone" delivers nothing on this machine; the UGREEN camera's microphone is the one
+  that works and should be the default input.

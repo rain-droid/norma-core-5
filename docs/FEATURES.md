@@ -13,6 +13,9 @@ Last updated 2026-11-22.
 | See the table | `capture_camera`, `find_objects`, `pixel_to_table`, `look_at_table` | real | Top camera is the UGREEN above the mat since 2026-11-22 |
 | A blocked move is tried again, slower | every tool, through `util/arm.py` `Arm.joints` | tests with a faked daemon; not yet seen on the real arm | Once, from where the arm stopped, at `blocked_retry_speed` (0.5) of its speed: `workspace/robot_config/motion.json`. See "When a move is blocked" |
 | Pick and place by position | `pick_at`, `place_at` | real | Checks nothing by camera |
+| Objects by name, world model | `describe_objects`, `name_objects`, `world_model`, `grasp_object`, `put_object` | sim for pick and place by name; `describe_objects` and naming run on the real table (camera only) | The agent names objects from a picture sheet; names survive moves. A ring is recognised by its hole and gripped by the rim (rim grasp not yet tried on the real arm) |
+| Writing a skill after a new task | `create_skill` | sim | Appends the tool calls actually made, failures included |
+| Safe mode: straight down, straight lines, refuse what is too far | `robot_config/motion.json` `safe_mode`, `tools/util/safe.py` | sim | On by default for the real arm, not yet run on it. Shrinks the working area to about 32 x 12 cm in front of the base |
 | Pick with wrist-camera checks | `pick_verified` | real (one cube, three runs) | Corrects the aim from the hover point, confirms the object is in the jaws |
 | Live tracking, pick and place by name | `track_objects`, `pick_object`, `place_object` | real with the old top camera; not re-run since the camera change | Names are colour plus a number (`blue-1`) |
 | Grasp planning among neighbours | `plan_grasp` | sim | Neighbours come from `find_objects`; the arm's own parts can show up there as grey objects |
@@ -21,6 +24,7 @@ Last updated 2026-11-22.
 | The plan on screen: what is running now, what comes next | `show_steps`, the web UI's Steps panel (switch in the top bar) | sim and the UI's demo mode | Shows what the agent announces; an agent that does not call it leaves only the "now" line |
 | Skills | `activate_skill`, `deactivate_skill` | real | `skills/*/SKILL.md`: pick-and-place, recover, direct-joint-control, play-chess, draw |
 | Camera panel: switch feeds, live vision layers | web UI, `GET /api/camera/{name}/vision` | sim (UI checked against the simulator) | Tabs for every camera; toggles for Objects, Tags, Frame, Arm, Tools. `?camera=top&layers=objects,frame,arm` opens it that way |
+| Chat and voice in the web UI, driving the workspace | chat box, microphone; `src/elrobot/voice/` | The agent answered a look-only request on the real cameras (ran `describe_objects`, named what it saw) in 3.7 s. Speech in and out tested on Linux outside the daemon. Not yet run through the browser end to end | Start with `pixi run up`. `ELROBOT_CHAT_AGENT=mcp` for the older tool set |
 | Web UI, MCP server, voice agent | `web/`, `src/elrobot/mcp_server.py`, `src/elrobot/voice/` | built by teammates; not exercised in the 2026-11-22 sessions | See `CLAUDE.md` and `docs/API.md` |
 
 ## A verified pick, in pictures

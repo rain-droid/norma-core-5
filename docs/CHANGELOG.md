@@ -5,6 +5,57 @@ today is in `docs/FEATURES.md`. Add an entry with each push.
 
 ## 2026-11-22
 
+### Safe mode: straight down, straight lines, or not at all
+Modified by: Atharva Bhorpe
+
+- `workspace/robot_config/motion.json` has `"safe_mode": true` (`ELROBOT_SAFE_MODE=0` or `1` overrides it;
+  `workspace/tools/util/safe.py`). While it is on, the gripper only points straight down, with the jaws turned
+  to suit the object, and every move between two places is three straight lines: up to a carry height, across,
+  down. `home` goes to a straight-down ready pose.
+- What cannot be done that way is refused before the arm moves. Straight down, this arm reaches about 16 cm
+  either side of the base and 12 to 24 cm in front of it, no higher than about 7 cm: an object further out is
+  "too far", `describe_objects` marks it `reachable: false`, and the agent is told to ask for it to be moved.
+- Carried objects travel about 4 cm above the table (`carry_height` 0.065 less the grasp height).
+- Simulator tests in `tests/test_safe_mode.py`; the other simulator tests run with it off. Not yet run on the real arm.
+
+### The web UI's chat and voice drive the workspace agent; speech works on Linux
+Modified by: Atharva Bhorpe
+
+- The chat box and the microphone now talk to an agent that runs in `workspace/` and uses its tools, skills and
+  world model: the same harness as a terminal session started there. Before, they reached a separate agent that
+  only had the daemon's older wrist-camera tools. `ELROBOT_CHAT_AGENT=mcp` brings that one back.
+- Nobody approves that agent's commands, so a fixed rule does (`workspace_permission` in
+  `src/elrobot/voice/agent.py`): it may run one Python file from the workspace per command, write inside the
+  workspace except `robot_config/`, and read inside the repository. Tests in `tests/test_chat_agent.py`.
+- Speech on Linux: `faster-whisper` for speech to text where MLX does not exist. Text to speech is Gradium's
+  Phonon (`ptts`, the 31M English model, Apache 2.0, voice "Easton"), with Kokoro behind it as the fallback;
+  `ELROBOT_PHONON_VOICE` picks another of its hundred or so voices, `ELROBOT_TTS_PROVIDER=kokoro` goes back.
+  The `voice` extra installs the right one per platform, and the pixi environment now includes it.
+- Speech to text off Apple silicon is now NVIDIA Parakeet TDT 0.6B v3 (`onnx-asr`, CC BY 4.0), with Whisper
+  `small` behind it (`ELROBOT_STT_BACKEND=whisper`). On nine synthesised sentences in the three languages:
+  Parakeet 300 ms an utterance and 11% word errors clean and at 10 dB noise, 33% at 3 dB; Whisper `small`
+  1250 ms and 15%, 19%, 22%. Parakeet cannot be told which languages to expect, and in the heaviest noise it
+  took one French sentence for English. Synthetic voices, nine sentences: an indication, not a benchmark.
+- English, French and German, in voice and in text (`ELROBOT_LANGUAGES`, default `en,fr,de`). Speech to text
+  picks the most likely of those languages for each utterance (Whisper `small`); the agent answers in the
+  language it was addressed in; each sentence of the reply is voiced by that language's voice (Easton, Baptiste,
+  Mirko) from Phonon's 40M multilingual model. That model is CC BY-NC and gated: the machine has to be logged in
+  to a Hugging Face account that accepted its licence, otherwise the English model stands in.
+- `pixi run up` starts the agent as well; `pixi run up-quiet` is the old behaviour (`--no-voice`), under which
+  the chat box answers "Method Not Allowed".
+
+### Objects by name, a world model, and skills the agent writes
+Modified by: Atharva Bhorpe
+
+- `describe_objects` looks with the top camera and returns a picture sheet, one cut-out per object;
+  `name_objects` records what each is. Names are kept in `state/world.json` and stay with an object when it moves.
+- `world_model` reads what is on the table, where, what it stands on and what was done with it.
+- `grasp_object` and `put_object` work by name. A ring is recognised by the table showing through its hole and is
+  gripped by the rim. On the real table the ring, the pink box and the blue cube were found and named; the arm
+  has not yet grasped by name.
+- `create_skill` writes `skills/NAME/SKILL.md` from the agent's steps and appends the tool calls it actually made.
+- `workspace/AGENTS.md`: "Objects have names" and "Leave a skill behind".
+
 ### Web UI: camera switcher and live vision layers
 Modified by: Atharva Bhorpe
 
