@@ -10,6 +10,7 @@ dependencies = [
     "opencv-python-headless>=4.10",
     "pin-pink>=4.0",  # inverse kinematics (Pinocchio)
     "daqp>=0.5",  # the QP solver pink calls
+    "chess>=1.10",  # legal moves and game state for the chess tools (GPL-3.0)
 ]
 
 [tool.uv]

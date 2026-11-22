@@ -57,6 +57,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/70/a4/d345605b6f8c9d665baa1dd2f839ad6aee0d771e174be12c81fdd53067ed/cmeel_zlib-1.3.2-0-py3-none-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/87/4e/dcc0d9756d93be734d824e2a570cc9ac68909a1d7d3b6fc87c2fb32726c0/cmeel_tinyxml2-11.0.0-0-py3-none-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/8d/e4/7985df544d60d7b1b569834d8dcfbc469de37e6e3fae4a6510d77653bf72/libpinocchio-4.1.0-0-py3-none-manylinux_2_28_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/93/09/7d04d7581ae3bb8b598017941781bceb7959dd1b13e3ebf7b6a2cd843bc9/chess-1.11.2.tar.gz
       - pypi: https://files.pythonhosted.org/packages/99/61/522b973ba38987b22a4a71beaed2ea6ac9fd4f687baaa2bc9a45100625e0/numpy-2.5.5-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/c2/be/cdf44e32b580af6c0e8f237665c538e6a5a37872f865e92e08fb854d5fd9/opencv_python_headless-5.1.0.95-cp37-abi3-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/d6/14/b85bd33bb05c9bb7e87b9ac8401793c12a80a6d594b3ca4bcb5e971a24b7/cmeel_octomap-1.10.0-5-py3-none-manylinux_2_28_x86_64.whl
@@ -96,6 +97,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/77/b4/d72ebd5e9ee711b68ad466e7bd4c0edcb45b0c2c8a358fdcdb64b092666a/cmeel_qhull-8.0.2.1-0-py3-none-macosx_12_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/7a/9a/f8707dc94f25c9f1468b5cf220cb564036bf33fd4471e03d897df18e4122/libpinocchio-4.1.0-0-py3-none-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/85/f6/dfcc8b9c2989e7342aaac1781d147b06b31197337d1968029216be26ee43/cmeel_zlib-1.3.2-0-py3-none-macosx_11_0_arm64.whl
+      - pypi: https://files.pythonhosted.org/packages/93/09/7d04d7581ae3bb8b598017941781bceb7959dd1b13e3ebf7b6a2cd843bc9/chess-1.11.2.tar.gz
       - pypi: https://files.pythonhosted.org/packages/b8/3e/c6d597586bbef678f19c19f10b5b1f75203861d3acba41b2ec0cd3fca6d5/cmeel_boost-1.90.0-0-cp312-cp312-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/ba/61/cb30323bce5cec4a5a496e41972e12110638dbdba94f2d23814dd82f0eb4/eigenpy-3.13.0-0-cp312-cp312-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/bb/db/f8643a8766e8909e0dbfcda6191ca92454cf9a3fadd89be417db261601a1/cmeel_console_bridge-1.0.2.3-0-py3-none-macosx_11_0_arm64.whl
@@ -944,6 +946,11 @@ packages:
   - libcoal[build]>=3.0.3,<4 ; extra == 'build'
   - scipy ; extra == 'build'
   requires_python: '>=3.9'
+- pypi: https://files.pythonhosted.org/packages/93/09/7d04d7581ae3bb8b598017941781bceb7959dd1b13e3ebf7b6a2cd843bc9/chess-1.11.2.tar.gz
+  name: chess
+  version: 1.11.2
+  sha256: a8b43e5678fdb3000695bdaa573117ad683761e5ca38e591c4826eba6d25bb39
+  requires_python: '>=3.8'
 - pypi: https://files.pythonhosted.org/packages/99/61/522b973ba38987b22a4a71beaed2ea6ac9fd4f687baaa2bc9a45100625e0/numpy-2.5.5-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
   name: numpy
   version: 2.5.5
