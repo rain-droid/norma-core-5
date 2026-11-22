@@ -422,8 +422,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         """Lets the workspace's tools show on the timeline and the 3D view. Display only."""
         body = await request.json()
         kind = body.pop("kind", None) if isinstance(body, dict) else None
-        if kind not in ("tool_start", "tool_end", "markers", "detections", "log"):
-            raise HTTPException(400, "kind must be one of tool_start, tool_end, markers, detections, log")
+        if kind not in ("tool_start", "tool_end", "markers", "detections", "log", "steps"):
+            raise HTTPException(400, "kind must be one of tool_start, tool_end, markers, detections, log, steps")
         hub.emit(kind, **{k: v for k, v in body.items() if k not in ("type", "id", "t")})
         return {"ok": True}
 

@@ -207,6 +207,18 @@ export interface VoiceStateEvent extends EventBase {
   state: VoiceState;
 }
 
+/** The agent's own plan for its task: **replaces** the one before; empty `steps` clears it. */
+export interface StepsEvent extends EventBase {
+  kind: 'steps';
+  title: string;
+  steps: string[];
+  /** How many steps are finished, which is also the index of the one being worked on. */
+  current: number;
+  /** The current step is the one that went wrong. */
+  failed?: boolean;
+  source?: Source | null;
+}
+
 export type RobotEvent =
   | ToolStartEvent
   | ToolEndEvent
@@ -216,7 +228,8 @@ export type RobotEvent =
   | LogEvent
   | ChatEvent
   | SpeechEvent
-  | VoiceStateEvent;
+  | VoiceStateEvent
+  | StepsEvent;
 
 export type ServerMessage = Hello | RobotState | RobotEvent;
 

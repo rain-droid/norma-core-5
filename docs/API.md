@@ -94,6 +94,7 @@ and a `kind`. Kinds:
 | `log` | `level` (`info`/`warn`/`error`), `text` | daemon log line worth showing |
 | `chat` | `role` (`user`/`assistant`), `text`, `turn_id`, `final`, `via` (`voice`/`text`) | conversation transcript. Assistant text may arrive as several events with the same `turn_id`; each carries the **full text so far**, and the last has `final: true` |
 | `speech` | `turn_id`, `seq`, `text`, `url`, `duration_ms` | a synthesised sentence is ready; the browser plays these in `seq` order |
+| `steps` | `title`, `steps`, `current`, `failed`, `source` | the agent's plan for its task, for the UI's Steps panel: **replaces** the one before. `steps` is a list of short sentences, `current` how many are finished (so also the index of the one being worked on; equal to the length when all are done), `failed` marks the current step as gone wrong; empty `steps` clears |
 | `voice_state` | `state` | `idle`, `listening`, `transcribing`, `thinking`, `speaking`, `acting` |
 
 ## HTTP
@@ -160,7 +161,7 @@ The workspace's tools run in the agent's own shell. This is all they can ask of 
   `check` is false (`allow_low` lets the fingertips reach the table surface), and while any
   servo reports a fault. Shares the one-motion-at-a-time lock with `/api/tools`.
   A command without `call_id` shows on the timeline as a `joint_command` entry of its own.
-- `POST /api/event` with `{"kind": "tool_start" | "tool_end" | "markers" | "detections" | "log", ...}`
+- `POST /api/event` with `{"kind": "tool_start" | "tool_end" | "markers" | "detections" | "log" | "steps", ...}`
   puts an event on the stream, so tool calls made in the workspace show in the web UI. Display only.
 - `GET /api/meta` also carries `clearance` (`floor`, `body`, `min_y`, `limit_margin`): the envelope
   joint commands are held to, for whoever plans them.

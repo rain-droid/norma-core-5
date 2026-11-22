@@ -92,6 +92,17 @@ export interface DetectionSet {
   at: number;
 }
 
+/** The plan the agent last announced (`steps` event). */
+export interface Steps {
+  title: string;
+  steps: string[];
+  current: number;
+  failed: boolean;
+  source: Source | null;
+  /** Event time, unix seconds. */
+  t: number;
+}
+
 export type Meta = Omit<Hello, 'events' | 'type'>;
 
 /** Everything that is derived from the event stream. */
@@ -101,6 +112,7 @@ interface Derived {
   markers: WorldMarker[];
   detections: Record<string, DetectionSet>;
   voiceState: VoiceState;
+  steps: Steps | null;
 }
 
 export interface AppState extends Derived {
@@ -124,6 +136,7 @@ const EMPTY: Derived = {
   markers: [],
   detections: {},
   voiceState: 'idle',
+  steps: null,
 };
 
 export const app = createStore<AppState>({
@@ -264,6 +277,7 @@ function pickDerived(s: AppState): Derived {
     markers: s.markers,
     detections: s.detections,
     voiceState: s.voiceState,
+    steps: s.steps,
   };
 }
 
@@ -349,6 +363,13 @@ function reduce(d: Derived, ev: RobotEvent): Derived {
 
     case 'voice_state':
       return { ...d, voiceState: ev.state };
+
+    case 'steps': {
+      const steps = Array.isArray(ev.steps) ? ev.steps.filter((s): s is string => typeof s === 'string') : [];
+      if (steps.length === 0) return { ...d, steps: null };
+      const current = Math.max(0, Math.min(steps.length, Math.round(Number(ev.current) || 0)));
+      return { ...d, steps: { title: ev.title ?? '', steps, current, failed: Boolean(ev.failed), source: ev.source ?? null, t: ev.t } };
+    }
 
     default:
       return d;

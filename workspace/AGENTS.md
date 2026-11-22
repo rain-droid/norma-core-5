@@ -54,6 +54,7 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Drawing with a pen | `draw_plan`, `draw_pen`, `draw_run` | `draw_pen`, `draw_run` |
 | Poses and safety | `home`, `rest`, `stop` | `stop` always works |
 | Skills | `activate_skill`, `deactivate_skill` | no |
+| Telling the people watching what comes next | `show_steps` | no |
 
 A session usually goes: `activate_skill` for the task, `home` (wakes the arm and gets it out
 of the camera's way), `track_objects` and open its image, `pick_object` and `place_object` by
@@ -115,5 +116,8 @@ on its behalf, but it only knows about the arm and the table, not about objects 
   the top camera's search area can be missed. Its last alarm is recorded in
   `perception/exteroception/intrusion.jpg` and `intrusion.json`; those are historical,
   not live views. Never set `on_intrusion: "ignore"` automatically to work around repeated alarms.
+- For a task of more than one step, say what you are going to do with `show_steps` before you
+  start, and call it again as each step is finished or the plan changes. People follow the arm
+  on a screen; it is how they know what comes next.
 - When you learn something about this arm or this table that the next session should know,
   write it into the relevant skill or tool docstring.

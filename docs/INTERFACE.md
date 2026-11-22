@@ -201,6 +201,7 @@ Signatures as of 2026-11-22; `--schema` on a tool is always current.
 | `plan_grasp` | `object: str \| int \| None = None, x: float \| None = None, y: float \| None = None, footprint_mm: list \| None = None, yaw_deg: float = 0.0, height_mm: float \| None = None, obstacles: list \| None = None, pick: bool = False, attempts: int = 3` | Work out the best way to grasp an object, considering what stands around it; optionally do it. |
 | `read_proprioception` | - | Report the measured robot state and draw the body's current posture. |
 | `rest` | - | Fold the arm into its resting seat and switch the motors off. |
+| `show_steps` | `steps: list \| None = None, current: int = 0, title: str = '', failed: bool = False` | Show the people watching what you are doing and what comes next. |
 | `stop` | - | Halt all motion now and hold position. Always allowed, even while another tool is running. |
 | `track_objects` | `action: str = 'read', on_intrusion: str \| None = None` | Live tracking of what is on the table: read it, and start or stop it. |
 

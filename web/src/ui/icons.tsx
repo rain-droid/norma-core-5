@@ -75,6 +75,13 @@ export const GhostIcon = (p: SVGProps<SVGSVGElement>) => (
   </Svg>
 );
 
+export const StepsIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Svg {...p}>
+    <path d="M10 6.5h10M10 12h10M10 17.5h10" />
+    <path d="m3.5 6.5 1.4 1.4 2.6-2.8M4 12h2.5M4 17.5h2.5" />
+  </Svg>
+);
+
 export const CameraOffIcon = (p: SVGProps<SVGSVGElement>) => (
   <Svg {...p}>
     <path d="M3 3l18 18M9.5 6H15l1.5 2H19a2 2 0 0 1 2 2v7.5M17 19H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h1" />

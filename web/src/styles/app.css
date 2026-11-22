@@ -332,6 +332,161 @@
 /* Conversation + activity timeline                                    */
 /* ================================================================== */
 
+/* ---- Steps: what is running now, and the plan the agent announced ---- */
+.steps {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 46%;
+  padding: 0.6rem 0.7rem 0.65rem;
+  border-radius: var(--r-l);
+  background: var(--glass);
+  color: var(--paper);
+  font-size: var(--t-small);
+}
+.steps__now {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.5rem;
+}
+.steps__tag {
+  flex: none;
+  padding: 0.12rem 0.45rem 0.04rem;
+  border-radius: 999px;
+  background: rgba(227, 235, 255, 0.16);
+  color: var(--chalk);
+  font-size: var(--t-micro);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.steps__now[data-working='true'] .steps__tag {
+  background: var(--yellow);
+  color: var(--ink);
+}
+.steps__what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.steps__what i {
+  margin-left: 0.45rem;
+  color: var(--chalk-dim);
+  font-style: normal;
+  font-weight: 600;
+}
+.steps__what--quiet {
+  color: var(--chalk-dim);
+  font-weight: 600;
+}
+.steps__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-top: 0.1rem;
+}
+.steps__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-body);
+  font-weight: 800;
+}
+.steps__count {
+  flex: none;
+  color: var(--chalk-dim);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.steps__bar {
+  flex: none;
+  height: 0.22rem;
+  border-radius: 999px;
+  background: rgba(227, 235, 255, 0.16);
+  overflow: hidden;
+}
+.steps__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--yellow);
+  transition: width 0.3s ease;
+}
+.steps__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+.steps__list li {
+  display: grid;
+  grid-template-columns: 1.35rem minmax(0, 1fr);
+  column-gap: 0.5rem;
+  align-items: start;
+  font-weight: 600;
+}
+.steps__mark {
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  border: 0.12rem solid rgba(227, 235, 255, 0.4);
+  color: var(--chalk-dim);
+  font-size: var(--t-micro);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.steps__mark svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+.steps__text {
+  padding-top: 0.14rem;
+  overflow-wrap: anywhere;
+}
+.steps__list li[data-state='next'] .steps__text {
+  color: var(--chalk-dim);
+}
+.steps__list li[data-state='done'] .steps__text {
+  color: var(--chalk-dim);
+  text-decoration: line-through;
+  text-decoration-color: rgba(227, 235, 255, 0.4);
+}
+.steps__list li[data-state='done'] .steps__mark {
+  border-color: transparent;
+  background: rgba(227, 235, 255, 0.16);
+  color: var(--chalk);
+}
+.steps__list li[data-state='active'] .steps__mark {
+  border-color: var(--yellow);
+  background: var(--yellow);
+  color: var(--ink);
+}
+.steps__list li[data-state='active'] .steps__text {
+  font-weight: 800;
+}
+.steps__list li[data-state='failed'] .steps__mark {
+  border-color: var(--red);
+  background: var(--red);
+  color: var(--paper);
+}
+.steps__empty {
+  color: var(--chalk-dim);
+  font-weight: 600;
+}
+
 .timeline {
   position: relative;
   flex: 1;

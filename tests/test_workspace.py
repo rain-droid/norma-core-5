@@ -17,6 +17,7 @@ from elrobot.config import REPO_ROOT, Config
 from elrobot.daemon import create_app
 
 TABLE_Z = 0.010  # not zero, so a tool that forgets the table height shows
+HUB = None
 
 
 @pytest.fixture(scope="module")
@@ -27,6 +28,8 @@ def robot(tmp_path_factory):
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     app = create_app(Config(sim=True, voice=False, workspace_dir=root, table_z=TABLE_Z))
+    global HUB
+    HUB = app.state.hub  # the daemon's own state, for tests that check what reached it
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -111,6 +114,17 @@ def test_a_page_from_elsewhere_cannot_command_the_arm(robot):
 
     assert stop("https://example.com") == 403
     assert stop("http://localhost:5173") == 200  # the web UI under `npm run dev`
+
+
+def test_show_steps_puts_the_plan_on_the_event_stream(robot):
+    shown = run("show_steps", title="Cube onto the box", steps=["find the cube", "pick it up", "set it on the box"], current=1)
+    assert shown["working_on"] == "pick it up" and not shown["all_done"], shown
+    event = [e for e in HUB.events if e["kind"] == "steps"][-1]  # what a page that opens now is shown
+    assert (event["title"], event["current"], len(event["steps"]), event["failed"]) == ("Cube onto the box", 1, 3, False)
+
+    assert "current is the number" in run("show_steps", steps=["a"], current=2)["error"]
+    assert run("show_steps")["shown"] is False
+    assert [e for e in HUB.events if e["kind"] == "steps"][-1]["steps"] == []
 
 
 def test_top_camera_measures_at_a_height(robot):
