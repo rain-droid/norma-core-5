@@ -7,6 +7,13 @@ description: Pick up an object from the table and put it down somewhere else, or
    `track_objects`. Open `image` and decide which name is the object you want from what you
    see, not from the colour word alone. Check that its cross sits in the middle of where the
    object stands.
+   Once home has finished, `depth_scan` with `at: [[x, y]]` at the fresh top-camera position.
+   This reads the Orbbec DaBai DCW2 depth device (`2bc5:06a0`); its RGB device (`2bc5:0561`)
+   supplies `across` and is not a substitute for depth.
+   Open its height map; use depth for the object/support height (mm to metres), and top for x/y.
+   A stack's reading is its total top height above the mat; null/grey is unknown, not zero.
+   Inspect `capture_camera` with `camera: "across"` if the height or stacking is unclear.
+   `scan_obstacles` before carrying; refresh after objects move and after two minutes.
 2. `pick_object` with that name. It aims at where the object is at that moment (once it lies still), aims again if it moves, and tries again if the jaws come up empty.
    While something else moves on the table (a hand, most likely) the tracker slows the arm to
    a quarter of its speed, and lets it speed up again when the table is quiet. It keeps
@@ -24,7 +31,23 @@ description: Pick up an object from the table and put it down somewhere else, or
    (`look_at_table` over it, or the top image) and check that it is a pile and not two objects
    side by side; if `z_mm` is 0 the lower one's height is unknown, so give `pick_at` the height
    yourself.
-5. `rest` when the task is finished.
+5. `rest` when the task is finished. If the request is only to pick and hold, return `home`
+   while keeping the grip: `rest` refuses to fold while holding.
+
+After mat contact on 2026-11-22, all real-arm approaches end another 15 mm higher with their
+original hover height (`robot_config/motion.json`, `extra_descent_clearance_m`), on top of the
+10 mm model correction. All joint commands also enforce a 25 mm modelled fingertip floor,
+including raw/replayed paths, retries and `check:false`/`allow_low:true`. Do not lower a grasp
+or subtract these margins after a miss. Stop after observed contact, inspect current top and
+depth views, and correct alignment/calibration. Depth does not measure actual fingertip sag.
+After a lift/place, compare fresh depth and colour views; an occluded region proves nothing.
+The older successful grasp/placement measurements below predate this additional margin;
+they are historical observations, not current fingertip-clearance calibration.
+
+Checked on 2026-11-22 after adding the margin: the Orbbec measured the blue cube at 33 mm
+at top-camera x=0.151, y=0.282. `pick_object` with grasp_height 0.022 and one attempt lifted
+it at a 70-degree approach, width_mm 27.1. Wrist and across images confirmed the cube held.
+The earlier uncorrected approaches missed and contacted the mat; do not replay those paths.
 
 When the tracker does not have the object (no outline, or it shares one with another object;
 the table's own colour and black things on the dark mat are not seen):
@@ -74,11 +97,13 @@ release. Too few to correct from, but if a far placement has to be exact, aim a 
 A stack (a cube on a box) is one outline to `find_objects` unless the prompt names its parts:
 `find_objects` with `prompt: "blue cube, pink box"` (SAM 3 running) gives each its own entry,
 and the upper one has `on` (the id of what it stands on), `z_mm` (how high its underside is) and
-its own `height_mm`. Pick it with `pick_at` and `grasp_height` = (z_mm + height_mm / 2) / 1000.
+its own `height_mm`. Check those estimates with `depth_scan` before picking. For an isolated
+upper object, `grasp_height` = (z_mm + height_mm / 2) / 1000, with the shared clearance added
+by the planner; do not subtract it. The depth reading alone is total stack height.
 Heights are read off the side face the camera sees and are good to about 5 mm; they tend to
 come out a few millimetres low (the 30 mm cube reads 20 to 29). `z_mm` null means the lower
-object is too hidden to measure: move the upper one off by a height you judge yourself, or look
-from the wrist. Without the names, `pick_at` at the default height closed on the lower object
+object is too hidden to measure: inspect depth and the `across` view before choosing a height.
+Without the names, `pick_at` at the default height closed on the lower object
 (`width_mm` 36, not the cube's 27) and carried the pair: always check `width_mm` against the
 object you meant. Rings and rolls of tape get no `height_mm` (nothing of their side can be told
 from the hole).

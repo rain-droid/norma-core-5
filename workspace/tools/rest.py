@@ -5,6 +5,11 @@ shoulder raised), then slowly down onto it; then torque off, so the servos cool 
 rests the arm on its own base, which the clearance envelope would refuse, so both moves go
 with `check` off. Refuses while holding something. Use it when a task is finished, or to wait:
 a stretched-out arm keeps its shoulder servo working hard. `home` wakes it up again.
+
+The shared extra mat-clearance guard still checks these moves despite `check=False`.
+On 2026-11-22 it refused the path from home before sending any command (24.7 mm modelled
+fingertip clearance against the 25 mm floor). If this occurs, leave the arm at its safe
+ready pose and report that rest was blocked; do not lower or bypass the clearance limit.
 """
 
 from util.arm import RobotError

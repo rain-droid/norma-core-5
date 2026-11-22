@@ -1,7 +1,8 @@
 # ElRobot workspace
 
 You are in the working directory of a robot arm: a NormaCore ElRobot, seven joints and a
-parallel gripper, on a table, with a camera above the table (`top`) and one on its wrist.
+parallel gripper, on a table, with a camera above the table (`top`), one on its wrist, and
+an Orbbec depth camera across the table (its colour view is `across`).
 Everything you need to operate it is in this directory, as files.
 
 **The robot understands one thing: joint commands.** Seven joint angles in radians and a jaw
@@ -65,8 +66,10 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Telling the people watching what comes next | `show_steps` | no |
 
 A session usually goes: `activate_skill` for the task, `home` (wakes the arm and gets it out
-of the camera's way), `track_objects` and open its image, `pick_object` and `place_object` by
-name, look again to confirm, and `rest` when you are done or waiting. Do not leave the arm
+of the camera's way), `track_objects` and open its image, `depth_scan` at the object's fresh
+top-camera x/y and `scan_obstacles`, then `pick_object` and `place_object` by name. Look and
+check depth again to confirm, and `rest` when you are done or waiting. If intentionally holding
+an object, use `home`: `rest` refuses while holding. Do not leave the arm
 stretched out: holding that is hard on the shoulder servo.
 
 `pick_object` and `place_object` read the tracker while they move: they aim again when the
@@ -93,7 +96,9 @@ check the grasp. When the person talks about a thing, use their word for it as i
 
 ## Heights come from the depth camera
 
-Across the table from the arm stands a depth camera. Its colour picture is camera `across`
+Across the table from the arm stands an Orbbec DaBai DCW2 (the user's "Orbbec depth cam 2").
+It appears as two USB devices: RGB `2bc5:0561` and depth `2bc5:06a0`; use these identifiers,
+not changing USB bus/device numbers. Its colour picture is camera `across`
 (`capture_camera`): the scene from the front, good for seeing what is on top of what. Its depth
 sensor is read by `tools/depth_scan.py`: every thing standing on the mat with the height of its
 top, to about 3 mm, and a picture of the table from above coloured by height. Use it when height
@@ -101,7 +106,27 @@ is the question: how tall a stack is, whether one thing lies on another, whether
 whether something was really put down or lifted (scan before and after). Pass the x, y that
 `find_objects` gave for an object in `at` to get that object's height. For aiming a grasp keep
 using the top camera's positions. The arm hides what is under and behind it: send it home before
-a scan. If the camera's stand or the mat was moved, run `tools/calibrate_depth.py` once.
+a scan. Wait for that motion to finish before measuring. If the camera's stand or the mat
+was moved, run `tools/calibrate_depth.py` once.
+
+Use depth routinely before table descents, not just when asked about heights. After locating
+the target with a fresh top image, call `depth_scan` with `at: [[x, y]]`; use its height in
+millimetres to choose the grasp or supporting-surface height in metres. For a stack, depth
+reports the total top height above the mat, not the upper object's thickness. Inspect the
+height-map image and `across` colour view when a reading is unexpected. `null` or grey means
+unknown/occluded, not zero height or free space. Re-scan after anything moves. `depth_scan`
+measures; only `scan_obstacles` installs an obstacle map (two-minute lifetime). Neither
+calibrates the robot's actual fingertip height nor guarantees contact-free motion.
+
+After observed mat contact on 2026-11-22, `robot_config/motion.json`
+`extra_descent_clearance_m` is 0.015. Real-arm table approaches now end 15 mm higher than before
+with the original hover height. The shared planner and every outgoing joint path also enforce
+a modelled fingertip floor of 25 mm above the mat (10 mm model correction + 15 mm extra).
+This applies even with `check: false` or `allow_low: true`, including retries and recorded paths;
+generic Cartesian moves below the limit are refused. Do not subtract the margin from requested
+heights to undo it, or lower it after an empty grasp. After contact: stop, inspect fresh top and
+depth views, and correct alignment/height calibration before retrying. These limits cover this
+workspace's ElRobot joint commands, not independent second-arm daemon tools or hand-guiding.
 
 ## There is a second arm
 
@@ -174,7 +199,7 @@ on its behalf, but it only knows about the arm and the table, not about objects 
 
 - Only the newest image shows the present. After any motion, by you or by a person at the
   table, look again before choosing a point. Never reuse a pixel or a position from before.
-- Measure with the `top` camera. It is calibrated against the mat; it hangs 79 cm above
+- Measure x/y with the `top` camera and height with `depth_scan`. The top camera is calibrated against the mat; it hangs 79 cm above
   the mat, with the robot at the right edge of its image reaching towards the left: the robot's
   forward is image-left and its right is image-up. The `wrist` camera is for looking closely and
   for checking a grasp; positions from it are about 1 cm off within 25 cm of the base and 2 cm
@@ -186,7 +211,8 @@ on its behalf, but it only knows about the arm and the table, not about objects 
 - Units: metres, radians, gripper 0 (closed) to 1 (open). Base frame: origin on the table under
   the base, x to the robot's right, y forward, z up.
 - `check: false` and `allow_low: true` remove or loosen the robot side's clearance guard. Use
-  them deliberately, with small steps, after `read_proprioception`.
+  them deliberately, with small steps, after `read_proprioception`. They do not bypass the
+  workspace's additional mat-clearance floor. Depth readings do not authorize reducing it.
 - If something looks wrong or a person reaches in, `tools/stop.py` first, think second.
   The tracker slows the arm on unexplained motion (or stops it, with `track_objects`
   `on_intrusion: "stop"`), but is not a person detector or safety

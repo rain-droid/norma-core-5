@@ -1,4 +1,6 @@
-"""Measure how high things on the mat stand, with the depth camera across the table.
+"""Measure height with the Orbbec DaBai DCW2 depth camera across the table (USB 2bc5:06a0).
+
+Its separate RGB device is 2bc5:0561, available as capture_camera(camera="across").
 
     depth_scan()                                  everything standing on the mat
     depth_scan(at=[[0.05, 0.25], [-0.1, 0.3]])    also the height at those spots
@@ -13,6 +15,14 @@ What it is good for: the height of a stack or of one object on another, whether 
 whether something was really put down or lifted (scan before and after). Heights are good to
 about 3 mm. Positions are good to about a centimetre: for aiming a grasp use find_objects (the
 top camera), and pass its x, y here in `at` to get that object's height.
+
+Use this before table descents and after a lift or placement. Wait until the arm has finished
+moving home before scanning. Heights are relative to the mat: a stack's reading is its total
+top height, not the upper object's thickness. Divide mm by 1000 for grasp_height or place z.
+Null/grey is unknown, not a clear spot; inspect capture_camera(camera="across") and re-scan
+from an unobstructed view. A scan measures only: call scan_obstacles separately to install the
+collision map. It does not correct robot fingertip calibration or replace the shared extra
+descent-clearance limit in robot_config/motion.json.
 
 What it does not see: the side of things facing away from the camera, and the strip of mat behind
 each thing (its shadow, grey in the image). The arm over the mat shows as a tall thing too,

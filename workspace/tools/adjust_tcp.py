@@ -8,6 +8,9 @@ along the approach. Each offset is limited to 0.15 m; use move_tcp for bigger mo
 
 A waypoint is planned every 8 mm along the segment; if any step is unreachable or would hit the
 table or the arm, nothing moves and the error says how far along it failed.
+The shared real-arm mat floor still applies with allow_low. Before a downward adjustment near
+the table, inspect fresh top and depth_scan observations; do not use repeated small offsets to
+cancel the configured descent margin. Depth measures object/surface height, not finger sag.
 """
 
 import numpy as np

@@ -20,10 +20,14 @@ Trust the pick when `holding`, `seen_in_jaws` and a `width_mm` that matches the 
 the object hangs from a corner: look at `after_image`.
 
 `object_height` matters: a wrong height moves the measured position along the fingers by
-about as much as the error. Take it from find_objects (`height_mm`) or measure it. The first
+about as much as the error. Prefer depth_scan(at=[[x,y]]) at fresh top-camera coordinates;
+divide the corresponding heights_mm entry by 1000 for object_height. A stacked reading is total height above the
+mat, not the upper object's thickness. Missing/occluded depth is not zero height. The first
 look cannot see an object that is black or the colour of the mat, nor one hidden behind the
 jaws; it then says `seen_before_grasp: false` and the grasp goes ahead at x, y as given.
 `grasp_height` and `yaw_deg` are as in pick_at.
+The real-arm approach includes the configured extra descent clearance, currently 15 mm on
+top of the 10 mm correction. Do not undo it to compensate for an empty grasp.
 
 Positions seen through the wrist camera are in the arm's own frame, so this also shows how far
 the top camera's x, y was from where the arm found the object: `corrections_mm`. If that is

@@ -1,6 +1,7 @@
 """The depth camera across the table (Orbbec DaBai DCW2): depth pictures, and points in the base frame.
 
-The camera is two USB devices. Its colour camera is an ordinary webcam and reaches the tools
+The camera (the user's "Orbbec depth cam 2") is two USB devices: RGB 2bc5:0561 and depth
+2bc5:06a0. USB bus/device numbers can change. Its colour camera is an ordinary webcam and reaches the tools
 through the Station as camera `across`. Its depth sensor is read here, directly, with Orbbec's
 SDK (built into bin/orbbec/ by scripts/orbbec_setup.sh): 640x400, every pixel the distance along
 the lens axis. A grab takes about two seconds, most of it starting the sensor.

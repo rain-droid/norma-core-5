@@ -57,6 +57,15 @@ are the jaws. Its model (lens and mounting) is `camera_wrist.json` if someone ha
 it, otherwise a rough default that reads about 3 cm off on the real arm. Use it to look
 closely and to check a grasp, not to measure.
 
+Across the table is an Orbbec DaBai DCW2 depth camera: RGB USB `2bc5:0561`, depth USB
+`2bc5:06a0` (the user's "Orbbec depth cam 2"). `capture_camera(camera="across")`
+returns its colour view; `depth_scan(at=[[x, y]])` measures top height above the mat, in mm,
+using `camera_depth.json` (`T_base_depth`). Use a fresh top-camera x/y for aiming and depth
+for object/support heights before a descent. Move the arm aside and wait until it stops before
+scanning. Missing depth is unknown, not empty space. Re-run `calibrate_depth` if the camera or
+mat moves; `scan_obstacles` separately installs a two-minute obstacle map. Depth does not
+measure or correct the offset between modelled and actual fingertips.
+
 ## The servos
 
 ST3215 bus servos behind the NormaCore Station. They are position-controlled with a soft gain,
@@ -89,3 +98,11 @@ a straight path, `approach_for` for a grasp. Underneath is `tools/util/kinematic
 kinematics read from `model.urdf`, inverse kinematics solved by pink (Pinocchio). Both are
 this workspace's own and can be changed. The robot side has a separate copy for the clearance
 check it applies to every joint command, so nothing changed here loosens that.
+
+After mat contact on 2026-11-22, `motion.json` adds `extra_descent_clearance_m: 0.015`.
+Real-arm approaches end 15 mm higher with their original hover height, in addition to the
+existing 10 mm correction. `Planner.blocked` and `Arm._send` enforce a 25 mm modelled
+fingertip floor on the entire joint path, including retries, raw commands, `check=False`
+and `allow_low=True`. Generic Cartesian targets below the floor are refused. These are
+model-based margins, not a measurement of the physical fingers. Do not cancel them by
+subtracting from a requested height; use fresh top/depth observations to diagnose misses.

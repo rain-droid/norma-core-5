@@ -4,6 +4,9 @@ Cameras: `top` hangs above the table and sees the whole mat: use it to find thin
 measure where they are. The robot is at the right edge of its image and reaches towards the
 left, so the robot's forward is image-left and its right is image-up. `wrist` rides on the gripper and sees what the gripper points at (your own jaws
 are the black shapes at the bottom edge): use it to look closely and to check a grasp.
+`across` is the colour view of the Orbbec depth camera across the table: use it to inspect
+stacking and clearance from the side. It is a colour image, not a depth measurement; use
+depth_scan for heights. Use only top-camera pixels for calibrated table x/y.
 
 Does not move the arm. Returns an `image_id`: pass it, with a pixel, to pixel_to_table. Pixels
 are those of the unmodified image (`image`); `grid_image` is the same frame with labelled

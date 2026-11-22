@@ -17,7 +17,9 @@ joint-space segments under one trapezoidal speed profile, trims out servo droop 
 and stops with an error if a joint is blocked on the way (`Arm.joints` then tries once more,
 slower, before it gives up: robot_config/motion.json says how much slower). `speed_scale` in the same file slows every move down. `check=False` skips
 the envelope;
-`allow_low=True` lets the fingertips come down to the table surface. A gripper opening of 0 is
+`allow_low=True` relaxes the daemon's floor. Neither flag bypasses this workspace's extra
+real-arm mat clearance in robot_config/motion.json, checked across every joint path and retry.
+A gripper opening of 0 is
 a grasp: the jaws close until they stall and then hold just past that point.
 
 The call returns when the motion has finished. Killing the calling process does not stop a
@@ -39,10 +41,26 @@ MOTION_CONFIG = Path(__file__).resolve().parents[2] / "robot_config" / "motion.j
 BLOCKED_RETRY_SPEED = 0.5  # what applies when motion.json or its key is missing
 SLOWEST = 0.05  # the robot side raises any speed below this to it
 BLOCKED_PAUSE_S = 0.5  # let the arm settle where it stopped before the slower second try
+REAL_ARM_LIFT = 0.010  # model-to-real fingertip height correction, also used by the planner
+EXTRA_DESCENT_CLEARANCE = 0.015  # additional clearance after observed mat contact, 2026-11-22
 
 
 class RobotError(Exception):
     """The robot side said no, or cannot be reached: something to act on, not a bug."""
+
+
+def extra_descent_clearance() -> float:
+    """Extra real-arm descent clearance in metres, read for every command. Fail closed on
+    invalid configuration; a missing file/key retains the conservative 15 mm default."""
+    try:
+        value = json.loads(MOTION_CONFIG.read_text()).get("extra_descent_clearance_m", EXTRA_DESCENT_CLEARANCE)
+    except FileNotFoundError:
+        return EXTRA_DESCENT_CLEARANCE
+    except (OSError, json.JSONDecodeError, AttributeError) as e:
+        raise RobotError(f"not moving: cannot read descent clearance from robot_config/motion.json: {e}") from None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or not 0 <= value <= 0.1:
+        raise RobotError("not moving: extra_descent_clearance_m must be a finite number from 0 to 0.1 metres")
+    return float(value)
 
 
 def blocked_retry_speed() -> float:
@@ -103,6 +121,7 @@ class Arm:
         self.log = log  # a file that gets one JSON line per command sent
         self.sent = 0
         self._meta: dict | None = None
+        self._mat_kin = None
 
     # ---- reading
 
@@ -217,7 +236,52 @@ class Arm:
             advice = "Go over it or another way; if it has been moved since, scan again (tools/scan_obstacles.py)." if "the thing" in why else "Move the second arm away first (tools/second_arm.py), or go another way."
             raise RobotError(f"not moving: {why}. {advice}")
 
+    def _mind_the_mat(self, path) -> None:
+        """Check the full joint-space sweep, including unchecked commands and retries.
+
+        The real fingertips extend below the model. Keep the model correction plus the
+        additional descent margin above the mat. If already below the new limit, only a
+        non-descending retreat is allowed until clear. No labels or check flags exempt a move.
+        """
+        meta = self.meta()
+        if meta.get("mode") != "real":
+            return
+        floor = float(meta["table_z"]) + REAL_ARM_LIFT + extra_descent_clearance()
+        from util.kinematics import Kinematics
+
+        if self._mat_kin is None:
+            self._mat_kin = Kinematics(Path(__file__).resolve().parents[2] / "robot_config" / "model.urdf")
+        state = self.state()
+        here = np.array([j["q"] for j in state["joints"][:7]], dtype=float)
+        p = np.asarray(path, dtype=float)
+        p = p[None] if p.ndim == 1 else p
+        if p.ndim != 2 or p.shape[1] != 7 or not np.isfinite(p).all():
+            raise RobotError("not moving: a joint path must contain seven finite angles per waypoint")
+
+        def height(q):
+            g = self._mat_kin.geometry(q)
+            return float(min(g.tips[:, 2].min(), g.tcp[2]))
+
+        previous = height(here)
+        for end in p:
+            # At most 0.005 rad per joint: check the swept path, not just its endpoints.
+            count = max(1, int(np.ceil(np.max(np.abs(end - here)) / 0.005)))
+            for t in np.linspace(0.0, 1.0, count + 1)[1:]:
+                low = height(here + (end - here) * t)
+                required = min(floor, previous)  # permit an upward recovery from below the floor
+                if low < required - 1e-6:
+                    raise RobotError(
+                        f"not moving: descent would violate the extra mat clearance "
+                        f"(modelled fingertip {1000 * (low - meta['table_z']):.1f} mm above the mat; "
+                        f"minimum {1000 * (floor - meta['table_z']):.1f} mm). "
+                        "Use a higher target; check=false and allow_low=true do not bypass this limit."
+                    )
+                previous = max(previous, low) if previous < floor else low
+            here = end
+
     def _send(self, body: dict) -> dict:
+        if "path" in body:
+            self._mind_the_mat(body["path"])
         res = _request("/api/joints", body, timeout=300.0)
         self.sent += 1
         if self.log is not None:

@@ -5,6 +5,15 @@ description: What to do when a command is refused, the arm is blocked, a servo f
 
 Read the error first: each one is written to be acted on. Then, by what it says:
 
+- **fingers touched or dug into the mat**: `stop` immediately. Read measured state and fresh
+  top/across views, then retreat above the table if clear. Once home has finished, `depth_scan`
+  at the target and visible nearby mat; inspect the height map, and refresh `scan_obstacles`.
+  Missing depth is unknown. The 2026-11-22 correction adds 15 mm to table approach endpoints
+  without raising the hover, and all outgoing joint paths enforce 25 mm modelled fingertip
+  clearance. Do not reduce it, subtract it from target heights, or bypass it with raw commands.
+  Depth verifies surfaces/object heights, not the robot's fingertip offset: investigate that
+  calibration separately if contact disagrees with the model. Never repeat the same low path.
+
 - **busy**: another motion is running. Wait for it, or `stop` it.
 - **stopped**: someone pressed stop, or a tracker set to stop (`on_intrusion: "stop"`; by
   default it only slows the arm) detected unexplained motion.
@@ -36,7 +45,8 @@ Read the error first: each one is written to be acted on. Then, by what it says:
 - **closed on nothing**: the object is not where you sent the gripper. Look again; never retry
   the same numbers.
 - **slipped out while lifting**: look where it went. Pick again with the jaws across flat
-  sides (`yaw_deg` from `find_objects`) and a lower `grasp_height`.
+  sides (`yaw_deg` from `find_objects`) after checking its height with `depth_scan`. Keep the
+  added descent margin; do not automatically lower the grasp to compensate.
 - **the robot daemon is not reachable**, **not connected**: nothing here can fix that. Say so.
 
 When you are unsure what state the arm is in: `stop`, then `read_proprioception` and a top

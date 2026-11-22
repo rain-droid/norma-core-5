@@ -17,6 +17,11 @@ Before the game, with the person:
 2. `home`, then `capture_camera`, and read the four OUTER corners of the 8x8 grid off
    `grid_image`, in the order a1, h1, h8, a8 (a1 is the dark corner square at white's left
    hand). Ask which side is white if the picture does not show it.
+   After the arm stops, use `depth_scan` at top-camera board/piece positions to check board
+   thickness and piece-top heights; subtract board height for a piece's own height. Inspect
+   the `across` view for ambiguous readings; null/grey is unknown. `scan_obstacles` before
+   carrying pieces, and refresh after moves. Keep the shared extra mat-clearance floor even
+   if a short piece becomes unreachable; do not defeat it through direct joint commands.
 3. `chess_setup` with that `image_id`, `corners_px`, the king's height, the board's thickness
    and the side the arm plays. Open `board_image`: the yellow grid must lie on the squares all
    the way round. If it is off anywhere, correct the corners and run it again; nothing later

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from util.arm import Arm, RobotError
+from util.arm import Arm, RobotError, REAL_ARM_LIFT, extra_descent_clearance
 from util.kinematics import IKResult, Kinematics, approach_from_pitch, jaw_from_yaw
 from util.motion import READY_DEG
 
@@ -28,10 +28,10 @@ ROOT = Path(__file__).resolve().parents[2]
 # lowering the open jaws in 2 mm steps until the measured height stopped following the command:
 # they met the mat when the model had the tool point about 25 mm above it, at 20 cm and at 33 cm
 # from the base alike, and the model has the fingertips 12 mm below the tool point: about 13 mm
-# out. Picks at 20 to 22 mm and releases at 22 mm therefore pressed the fingers 3 to 5 mm into
-# the mat, and closing the jaws there tore it. With 10 mm the fingertips keep about 5 mm of air
-# at the lowest grasp. Not applied in the simulation, whose arm is exactly the model.
-REAL_ARM_LIFT = 0.010
+# out. The original 10 mm correction still contacted the mat on 2026-11-22. An additional
+# configurable margin now raises the endpoint, while keeping the original hover height to
+# shorten the descent. A shared fingertip floor also protects generic and raw joint moves.
+# Neither correction is applied in simulation, whose arm is exactly the model.
 
 
 class Planner:
@@ -41,6 +41,8 @@ class Planner:
         self.table_z: float = meta["table_z"]  # height of the table surface in the base frame
         self.envelope: dict = meta["clearance"]  # floor, body, min_y, limit_margin: what the robot side enforces
         self.lift: float = REAL_ARM_LIFT if meta.get("mode") == "real" else 0.0
+        self.descent_clearance = extra_descent_clearance() if meta.get("mode") == "real" else 0.0
+        self.mat_floor = self.lift + self.descent_clearance
         self.margin: float = self.envelope["limit_margin"]  # rad kept clear of each joint limit when planning
         self.kin = Kinematics(ROOT / "robot_config" / "model.urdf")
         self.kin.set_limits(*arm.limits())
@@ -53,7 +55,8 @@ class Planner:
         """Why the robot side would refuse this configuration, or None. Plans keep half a
         millimetre more than it asks for, so rounding on the way over cannot tip one into a refusal."""
         e = self.envelope
-        return self.kin.clearance(q, table_z=self.table_z, floor=0.0005 if allow_low else e["floor"] + 0.0005, body=e["body"], min_y=e["min_y"])
+        floor = max(self.mat_floor, 0.0 if allow_low else e["floor"]) + 0.0005
+        return self.kin.clearance(q, table_z=self.table_z, floor=floor, body=e["body"], min_y=e["min_y"])
 
     def solve(self, pos, *, pitch: float | None = None, yaw: float | None = None, approach=None, q_seed=None,
               allow_low: bool = False) -> IKResult:  # fmt: skip
@@ -108,11 +111,13 @@ class Planner:
         reaches both the grasp point (`grasp_z` above the table) and a hover point backed off
         `hover` metres along the approach. Straight-down only works within about 27 cm of the base.
 
-        On the real arm the grasp point is REAL_ARM_LIFT higher than `grasp_z`: see there.
+        On the real arm the grasp point includes REAL_ARM_LIFT plus the configured extra
+        descent clearance. The hover keeps its original height, shortening the descent.
 
         Returns (approach unit vector, pitch in degrees, hover joint angles, hover xyz, grasp xyz).
         """
-        grasp = np.array([target[0], target[1], self.table_z + grasp_z + self.lift])  # see REAL_ARM_LIFT
+        original_grasp = np.array([target[0], target[1], self.table_z + grasp_z + self.lift])
+        grasp = original_grasp + [0.0, 0.0, self.descent_clearance]
         seed = np.radians(READY_DEG)
         last = None
         refused: list[str] = []  # what the envelope said about each pose IK reached but may not use
@@ -126,7 +131,9 @@ class Planner:
         for pitch in (90, 80, 70, 60, 50, 40, 30):
             a = approach_from_pitch(grasp[:2], pitch)
             jaw = jaw_from_yaw(a, yaw if yaw is not None else 0.0)
-            hover_pos = grasp - a * hover
+            hover_pos = original_grasp - a * hover
+            if hover_pos[2] < grasp[2]:
+                continue  # the configured clearance must not turn an approach into an ascent
             rg = self.kin.ik(grasp, approach=a, jaw=jaw, q_seed=seed, limit_margin=self.margin, accept=lambda q: clear(q, True))
             if not rg.ok:
                 last = rg

@@ -43,6 +43,8 @@ def config(monkeypatch, tmp_path):
 
 @pytest.fixture
 def daemon(monkeypatch, config):
+    # These tests isolate retry behaviour; mat clearance has its own swept-path tests.
+    monkeypatch.setattr(Arm, "_mind_the_mat", lambda self, path: None)
     def make(*answers, **kw):
         d = Daemon(answers, **kw)
         monkeypatch.setattr(arm_module, "_request", d)

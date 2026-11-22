@@ -14,7 +14,12 @@ description: Move the arm with joint commands of your own when no tool does what
    (`speed` 0.4). A list of waypoints is travelled as one smooth move.
 5. Leave `check` on. When the robot side refuses a pose it names what would be hit: choose
    another pose instead of switching the check off. `allow_low` is for a deliberate reach down
-   to the table surface, nothing else.
+   near the table, nothing else. On the real arm neither flag bypasses the additional
+   mat-clearance floor in `robot_config/motion.json` (25 mm modelled fingertip clearance with
+   current settings), checked across the full path and retries. For a table descent, get fresh
+   top-camera x/y and `depth_scan` heights first; null is unknown. Use `scan_obstacles` before
+   travelling across the table. Depth does not measure the fingertips' model error, and direct
+   joints must not be used to undo the configured 15 mm shorter table approaches.
 6. Read each result. `worst_joint_error_deg` above a degree or so means the arm is pressing on
    something or straining. Look with a camera before the next command.
 7. For a goal in space without a tool for it, plan in Python: `from util.planning import

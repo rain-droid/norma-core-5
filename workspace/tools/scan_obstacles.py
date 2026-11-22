@@ -10,6 +10,12 @@ again: a stale map refuses moves for no reason, or allows one it should not.
 `things` are what was kept, tallest first (x, y, height_mm). The web UI's 3D view shows them as
 columns coloured by height, beside both arms. What is under or behind an arm is
 not seen: send the arms home or to rest first if that matters. No motion.
+
+Wait for the arms to stop before scanning. Use depth_scan(at=[[x, y]]) for the target's height
+and the top camera for x/y; this tool installs the depth obstacle map rather than choosing a
+grasp height. Refresh before carrying and after objects move. Missing depth and the excluded
+start/end regions are not proof of free space. This map supplements, and never relaxes, the
+extra mat-clearance floor applied to every ElRobot joint command in util/arm.py.
 """
 
 import numpy as np

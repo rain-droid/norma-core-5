@@ -12,7 +12,11 @@ How it gets there: inverse kinematics (util/planning.py) turns the pose into joi
 one joint command goes there, so the tool sweeps an arc, not a line. `straight: true` instead
 plans a waypoint every 8 mm along the straight segment, keeping the gripper's direction, and
 sends them as one command; use it for approach and retreat near objects. Poses that put the
-fingertips within 8 mm of the table are refused unless `allow_low`.
+fingertips within 8 mm of the table are refused unless `allow_low`. On the real arm a stricter
+shared floor also applies: 25 mm modelled fingertip clearance with current motion.json settings,
+even with allow_low. Targets are absolute and are refused rather than silently shifted.
+Before a table descent, use fresh top-camera x/y and depth_scan for surface/object heights;
+depth is relative to the mat, whereas z here is absolute in the base frame.
 
 Returns where the tool measurably ended up and how far that is from the target.
 """

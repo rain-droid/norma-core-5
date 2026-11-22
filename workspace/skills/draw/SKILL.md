@@ -14,6 +14,10 @@ description: Draw on a sheet of paper with a pen held in the gripper: copy a dra
    30 cm from the base, taped down if it slides. Get its four corners in the base frame from a
    capture with `pixel_to_table` (height 0), in the order bottom-left, bottom-right, top-right,
    top-left of the drawing as it should read to whoever will look at it.
+   After home has finished, use `depth_scan` at the sheet area to check the supporting surface
+   and raised obstacles, with top-camera x/y. Null/grey is unknown, and roughly 3 mm depth
+   accuracy cannot establish pen contact or paper thickness; retain the taught pen-tip method.
+   All joint paths retain the configured extra mat clearance; never reduce it to reach paper.
 3. The pen. `draw_pen` with those `corners`: the arm holds its open jaws over the middle of
    the sheet. Ask the person to stand the pen between the jaws, parallel to the fingers, cap
    off, tip resting on the paper, and to hold it there. Then `draw_pen` with `grip: true`.

@@ -19,8 +19,12 @@ in; along the finger pads it stays wherever x, y put it.
 `grasp_height` is where the tool point ends up above the table: about half the object's height.
 The fingertips are 12 mm beyond the tool point, so
 below 0.020 they press into the mat, so anything lower is raised to 0.020 (MIN_GRASP_HEIGHT; the
-result says so). On the real arm the planner sends the tool point 10 mm higher than this again
-(REAL_ARM_LIFT in util/planning.py): its fingertips sit lower than the model says. A short object is then gripped by its upper part. Beyond about 27 cm the
+result says so). On the real arm the planner adds the 10 mm model correction plus the
+extra_descent_clearance_m setting (currently 15 mm), keeping the old hover height so the
+descent is shorter. Do not subtract these offsets from grasp_height after an empty grasp.
+Use fresh top-camera x/y and depth_scan(at=[[x,y]]) for object height before descending;
+scan_obstacles installs the separate obstacle map. A short object is gripped by its upper part.
+Beyond about 27 cm the
 gripper has to lean, and leaning jaws that are also turned (`yaw_deg` not 0) dip one fingertip
 towards the table.
 

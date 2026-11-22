@@ -13,6 +13,10 @@ waypoint that would put the fingertips into the table, the arm into itself, or t
 the base. `allow_low` lets the fingertips come down to the table surface, as a grasp needs.
 `check: false` skips that envelope: the arm goes wherever it is sent, so look at the current
 pose first (read_proprioception) and move in small steps.
+Neither flag bypasses this workspace's real-arm mat floor: util/arm.py checks the entire
+joint-space sweep before sending, including retries, for the model correction plus
+extra_descent_clearance_m (25 mm total with current settings). Use top-camera x/y and depth_scan
+heights before descending near the mat; depth does not calibrate the physical fingertips.
 
 A gripper opening of 0 is a grasp: the jaws close until they stall, then hold just past that
 point, and `gripper.holding` in the result says whether something stopped them.
