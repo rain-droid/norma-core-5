@@ -1,0 +1,4 @@
+{
+ "blocked_retry_speed": 0.5,
+ "note": "A move the robot side stops as blocked is sent once more at this fraction of its speed (tools/util/arm.py). Between 0 and 1: 0.5 is half as fast, 1 the same speed again, 0 no second try."
+}

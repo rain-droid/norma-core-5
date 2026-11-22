@@ -17,7 +17,11 @@ Read the error first: each one is written to be acted on. Then, by what it says:
   too fast. It is holding where it stopped. Look with the top camera and
   `read_proprioception`. If something is in the way, go back the way you came, slowly. If
   nothing is, it was load: repeat slower (`home` at 0.5 or less when getting up from rest) or
-  from a less stretched pose.
+  from a less stretched pose. `Arm.joints` has already sent the move a second time, slower,
+  from where the arm stopped (a result that needed it carries `retried_blocked`), so a
+  "blocked" error that reaches you has failed twice: look before trying a third time. How
+  much slower is `blocked_retry_speed` in `robot_config/motion.json`, between 0 and 1: 0.5 is
+  half speed, 0 switches the second try off.
 - **servo fault on joint(s) ... (status 32 = overload)**: that joint has dropped to a fifth of
   its torque and may be sagging. No command will be accepted and none should be tried, least
   of all with `check: false`. A person has to hold the arm while torque is switched off and on.

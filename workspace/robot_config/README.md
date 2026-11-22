@@ -76,6 +76,12 @@ moves, and a joint more than 12.6 degrees behind for half a second counts as blo
 from the resting pose is the heaviest move: at speed 0.5 the upper elbow trails by about 9.5
 degrees, which is why `home` defaults to that speed. Faster has been refused as blocked.
 
+A move stopped as blocked is sent once more, slower, from where the arm stopped
+(`tools/util/arm.py`). `motion.json` says how much slower: `blocked_retry_speed`, between 0 and
+1, is the fraction of the first try's speed. 0.5 is half as fast, 1 the same speed again, 0 no
+second try. It is read each time a move is blocked, so an edit needs no restart. Servo faults,
+a lost connection and every other refusal are not tried again.
+
 ## Kinematics
 
 `tools/util/planning.py` turns tool poses into joint angles: `solve` for one pose, `line` for
