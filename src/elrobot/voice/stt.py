@@ -275,6 +275,8 @@ class STT:
         prompt = config.STT_PROMPT if initial_prompt is None else initial_prompt
         self.initial_prompt: str | None = None if prompt.strip().lower() in ("", "none") else prompt
         self._model_path: str | None = None
+        self._faster_model = None  # loaded on first use, off Apple silicon
+        self._parakeet_model = None  # likewise; False once it has failed to load
         self.detector = SpeechDetector()
         # MLX keeps per-thread state, so load, warm-up and every transcription
         # all run on this one thread.
@@ -324,8 +326,79 @@ class STT:
 
     # -- transcription ----------------------------------------------------
 
+    def _faster(self):
+        """The faster-whisper model (CTranslate2): what runs where MLX does not, which is
+        everywhere but Apple silicon. On the graphics card if CUDA and its libraries are
+        there, otherwise on the processor with 8-bit weights."""
+        if self._faster_model is None:
+            from faster_whisper import WhisperModel
+
+            name, root = config.STT_MODEL_FASTER, str(config.MODELS_DIR / "faster-whisper")
+            tries = [("cpu", "int8")] if config.STT_DEVICE == "cpu" else [("cuda", "float16"), ("cpu", "int8")]
+            for device, compute in tries:
+                try:
+                    model = WhisperModel(name, device=device, compute_type=compute, download_root=root)
+                    list(model.transcribe(np.zeros(SAMPLE_RATE // 2, np.float32), language="en", beam_size=1)[0])
+                except Exception as e:  # no CUDA, or its libraries missing: the next one down
+                    log.info("faster-whisper %s on %s not usable: %s", name, device, str(e).splitlines()[0][:120])
+                    continue
+                log.info("speech to text: faster-whisper %s on %s (%s)", name, device, compute)
+                self._faster_model = model
+                break
+            else:
+                raise RuntimeError(f"faster-whisper could not load '{name}' on any device")
+        return self._faster_model
+
+    def _parakeet(self):
+        """NVIDIA Parakeet v3 through onnx-asr, or None if it is not wanted or cannot be loaded."""
+        if self._parakeet_model is None and config.STT_BACKEND in ("auto", "parakeet"):
+            try:
+                import onnx_asr
+
+                model = onnx_asr.load_model(config.STT_MODEL_PARAKEET, quantization=config.STT_PARAKEET_QUANT or None)
+                self._parakeet_model = model.with_timestamps()  # that form also gives each token's log-probability
+                log.info("speech to text: %s (%s) through onnxruntime", config.STT_MODEL_PARAKEET, config.STT_PARAKEET_QUANT or "f32")
+            except Exception as e:
+                log.warning("Parakeet not usable (%s); using Whisper", str(e).splitlines()[0][:160])
+                self._parakeet_model = False
+        return self._parakeet_model or None
+
+    def _infer_parakeet(self, model, audio: np.ndarray) -> dict:
+        result = model.recognize(audio, sample_rate=SAMPLE_RATE)
+        text = (result.text or "").strip()
+        logprobs = [float(p) for p in (result.logprobs or [])]
+        # The model writes the language it hears without naming it. The words name it, when they
+        # can: two guesses from opposite starting points that agree. Otherwise it is left open and
+        # the conversation's language so far stands.
+        from .tts import detect_language
+
+        guesses = {detect_language(text, default=code) for code in config.LANGUAGES[:2]} if text else set()
+        language = guesses.pop() if len(guesses) == 1 else None
+        if self.language is not None:
+            language = self.language
+        segment = {"text": text, "no_speech_prob": 0.0, "avg_logprob": sum(logprobs) / len(logprobs) if logprobs else 0.0, "compression_ratio": 1.0}
+        return {"text": text, "language": language, "segments": [segment] if text else []}
+
     def _infer(self, audio: np.ndarray) -> dict:
-        import mlx_whisper
+        try:
+            import mlx_whisper
+        except ModuleNotFoundError:
+            parakeet = self._parakeet()
+            if parakeet is not None:
+                return self._infer_parakeet(parakeet, audio)
+            model = self._faster()
+            language = self.language
+            if language is None:  # the most likely of the configured languages, not of all hundred
+                _, _, ranked = model.detect_language(audio)
+                allowed = [(code, p) for code, p in ranked if code in config.LANGUAGES]
+                language = max(allowed, key=lambda t: t[1])[0] if allowed else config.LANGUAGES[0]
+            segments, info = model.transcribe(
+                audio, language=language, task="transcribe", beam_size=1, temperature=0.0,
+                condition_on_previous_text=False, without_timestamps=True,
+                initial_prompt=self.initial_prompt if language == "en" else None,  # the prompt is English
+            )  # fmt: skip
+            found = [{"text": s.text, "no_speech_prob": s.no_speech_prob, "avg_logprob": s.avg_logprob, "compression_ratio": s.compression_ratio} for s in segments]
+            return {"text": "".join(s["text"] for s in found), "language": info.language, "segments": found}
 
         return mlx_whisper.transcribe(
             audio,

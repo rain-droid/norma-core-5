@@ -21,7 +21,10 @@ dependencies = [
 
 [project.optional-dependencies]
 voice = [
-    "mlx-whisper>=0.4",
+    "mlx-whisper>=0.4; sys_platform == 'darwin'",  # speech to text on Apple silicon
+    "faster-whisper>=1.0; sys_platform != 'darwin'",  # speech to text everywhere else (CTranslate2, CPU or CUDA)
+    "onnx-asr[hub]>=0.6; sys_platform != 'darwin'",  # NVIDIA Parakeet v3 through onnxruntime: the preferred recogniser there
+    "ptts>=0.1",  # Gradium's Phonon: small on-device text to speech, the preferred local voice
     "kokoro-onnx>=0.4",
     "soundfile>=0.12",
 ]
@@ -46,11 +49,12 @@ python = "3.12.*"
 pytest = "*"
 
 [tool.pixi.pypi-dependencies]
-elrobot-agent = { path = ".", editable = true }
+elrobot-agent = { path = ".", editable = true, extras = ["voice"] }
 
 [tool.pixi.tasks]
 sim = "elrobot up --sim --no-voice"
-up = "elrobot up --no-voice"
+up = "elrobot up"  # Station, daemon, and the chat and voice agent
+up-quiet = "elrobot up --no-voice"  # without the agent: the web UI's chat box and microphone are off
 test = "pytest -q"
 
 [tool.pytest.ini_options]
