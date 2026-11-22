@@ -10,7 +10,7 @@ Tick items off here as they land; put the name of whoever takes one after it. Wh
 |---|---|---|---|---|
 | 1 | Multiple tasks | Sort cubes by colour, stack them, draw with a marker | Drawing has only run in the simulator: about 2 h on the real arm | pick and place work on the real arm; drawing open |
 | 2 | Zero-shot | "Put the blue cube on the pink box", "push the cube to the corner", "wave" | None; record the runs | to record |
-| 3 | Failure recovery | Take the cube away mid-reach, or nudge it; the arm re-aims and retries | None; `pick_object` and `pick_verified` already do this | to record; `pick_object` not re-run since the camera change |
+| 3 | Failure recovery | Take the cube away mid-reach, or nudge it; the arm re-aims and retries. Also: a move stopped as blocked goes through on a slower second try | None; `pick_object` and `pick_verified` already do the first, `Arm.joints` the second | to record; `pick_object` not re-run since the camera change |
 | 4 | Automatic skill creation | After a zero-shot task the agent writes a new `skills/<name>/SKILL.md`; a second run uses it | About 30 min for a `create_skill` tool and an instruction line | open |
 | 5 | Code-as-policy | "Lay the cubes in a line every 5 cm", "draw a spiral": the agent writes a Python script against the planner | None; the workspace already works this way | to record |
 | 6 | One-shot / few-shot | Move the limp arm through a motion once; it records and replays it | About 1.5 h for `record_demo` and `replay_demo` | open |
@@ -84,6 +84,8 @@ remains" first, then drawing on real paper (requirement 1 still holds with sort 
 - [x] `pick_verified`: wrist camera checks before and after; blue cube picked three times on the real arm
 - [x] `scripts/cameras_ready.sh`
 - [x] Docs: FEATURES, DECISIONS, INTERFACE, this plan
+- [x] A blocked move is tried once more, slower (`blocked_retry_speed` in `workspace/robot_config/motion.json`,
+      default 0.5); tests in `workspace/tests`. Not yet seen on the real arm
 
 ## Keep the setup alive
 

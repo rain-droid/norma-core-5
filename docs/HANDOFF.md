@@ -4,7 +4,9 @@
 (`top` = UGREEN above the mat, `wrist`, `across`), top camera recalibrated, `base_in_mat` refitted, wrist
 calibration from `main` in use. A blue cube was picked three times on the real arm, the last with
 `pick_verified` from top-camera coordinates. Chess, drawing and `plan_grasp` exist and pass in the simulator
-only. The arm was left at `rest`. See `docs/FEATURES.md` for what is proven and `docs/DECISIONS.md` for why.
+only. A move the daemon stops as blocked is now sent once more at half speed (`blocked_retry_speed` in
+`workspace/robot_config/motion.json`); that is tested with a faked daemon and has not yet happened on the real
+arm. The arm was left at `rest`. See `docs/FEATURES.md` for what is proven and `docs/DECISIONS.md` for why.
 
 **Before starting the Station again:** `scripts/cameras_ready.sh` (Station stopped), then `pixi run up`.
 If frames come out 640x480 the script was skipped.

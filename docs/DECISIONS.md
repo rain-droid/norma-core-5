@@ -6,6 +6,24 @@ from commit messages, `CLAUDE.md` and `workspace/AGENTS.md`, not witnessed.
 
 ## 2026-11-22
 
+**A move stopped as blocked is sent once more, slower, by the workspace, not by the daemon.** Most "blocked"
+stops on this arm are a joint trailing a fast setpoint under load with nothing in the way, and the same move
+slower goes through (seen on joints 1, 2, 4 and 6, and on `home` from rest above speed 0.5). It lives in `Arm.joints` (`util/arm.py`), which
+every tool ends in, because the daemon takes joint commands and decides nothing: a second try is a second joint
+command, and it is in `joint_commands.jsonl` like the first. Cost: when something really is in the way the arm
+pushes against it a second time, slower, before the error comes back.
+
+**Once, and only for "blocked".** A second refusal is raised as it is: two failures mean look, not try a third
+time. A servo fault needs a person, a lost connection or a stop is not cured by going slower, and an envelope
+refusal is the same at any speed, so none of those is tried again. Nor is a gripper-only command. The second try
+starts from the waypoint nearest to where the arm stopped, not from the start of the path.
+
+**How much slower is one number in a file: `blocked_retry_speed` in `workspace/robot_config/motion.json`, 0 to 1,
+default 0.5.** A fraction of the first try's speed, so it scales with whatever speed the tool chose. 0 switches
+the second try off, which is what a contact-seeking setup wants. It is read when a move is blocked, not at
+start, so it can be tuned between two commands. A value that cannot be read means no second try and the error
+says so: a typo in the file must not stop the arm from working, and must not pass unnoticed either.
+
 **Chess, drawing and the grasp planner were added to the existing workspace, not built as a second harness.**
 A separate harness was started from scratch before this repo was found; it duplicated the robot layer and had
 never touched hardware. The new capabilities were ported to the workspace's conventions instead. The prototype

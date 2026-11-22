@@ -26,6 +26,7 @@ Python 3.12, managed with `uv`:
 uv sync                                   # install (add --extra voice for STT/TTS)
 uv run --with pytest pytest tests -q      # all tests (pytest is not a declared dependency)
 uv run --with pytest pytest tests/test_kinematics.py::test_zero_pose_matches_mesh_measurements -q
+(cd workspace && uv run --with pytest pytest -q tests)   # workspace code against a faked daemon, no robot
 
 uv run elrobot up                         # Station + daemon (needs bin/station and hardware)
 uv run elrobot up --sim                   # daemon only, simulated servos, no hardware

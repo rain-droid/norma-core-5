@@ -11,6 +11,7 @@ Last updated 2026-11-22.
 | Wake, home, rest, stop | `home`, `rest`, `stop` | real | `rest` switches the motors off; `home` from rest at speed 0.5 or less |
 | Move the tool point | `move_tcp`, `adjust_tcp`, `joint_command` | real | Straight-down poses only within about 27 cm of the base |
 | See the table | `capture_camera`, `find_objects`, `pixel_to_table`, `look_at_table` | real | Top camera is the UGREEN above the mat since 2026-11-22 |
+| A blocked move is tried again, slower | every tool, through `util/arm.py` `Arm.joints` | tests with a faked daemon; not yet seen on the real arm | Once, from where the arm stopped, at `blocked_retry_speed` (0.5) of its speed: `workspace/robot_config/motion.json`. See "When a move is blocked" |
 | Pick and place by position | `pick_at`, `place_at` | real | Checks nothing by camera |
 | Pick with wrist-camera checks | `pick_verified` | real (one cube, three runs) | Corrects the aim from the hover point, confirms the object is in the jaws |
 | Live tracking, pick and place by name | `track_objects`, `pick_object`, `place_object` | real with the old top camera; not re-run since the camera change | Names are colour plus a number (`blue-1`) |
@@ -44,6 +45,32 @@ flowchart TD
     W -- "no" --> Q["holding, but seen_in_jaws false:<br/>open after_image"]
 ```
 
+## When a move is blocked
+
+The daemon stops a move as "blocked" when a joint trails its setpoint by more than 12.6 degrees for half a
+second. On this arm that is most often a move that was too fast or too heavy with nothing in the way, and the
+same move goes through slower. So `Arm.joints`, which every tool ends in, sends it once more by itself.
+
+```mermaid
+flowchart TD
+    M["joint command at speed s"] --> R{"daemon's answer"}
+    R -- "done" --> OK["result"]
+    R -- "any other refusal:<br/>servo fault, envelope, stopped, lost state" --> E["error, as before"]
+    R -- "blocked" --> C{"blocked_retry_speed<br/>in motion.json"}
+    C -- "0" --> E
+    C -- "not a number from 0 to 1" --> E2["the blocked error, plus<br/>why there was no second try"]
+    C -- "f, 0 < f <= 1" --> N{"arm still usable?<br/>connected, no servo fault"}
+    N -- "no" --> E
+    N -- "yes" --> S["wait 0.5 s, send the waypoints still ahead<br/>at speed s x f (at least 0.05)"]
+    S -- "done" --> OK2["result with retried_blocked"]
+    S -- "refused again" --> E3["the second error"]
+```
+
+`blocked_retry_speed` is the one setting, in `workspace/robot_config/motion.json`: 0.5 (the default) is half as
+fast, 1 the same speed again, 0 no second try. It is read each time a move is blocked, so an edit needs no
+restart. Both tries are in the call's `joint_commands.jsonl`. A gripper-only command is not tried again, and a
+tool that means to stop on contact passes `retry_blocked=False`.
+
 ## How the pieces fit
 
 ```mermaid
@@ -72,12 +99,13 @@ flowchart LR
 |---|---|
 | `workspace/` | The agent's working directory: tools, skills, robot model, live perception, call history. Start an agent here. `workspace/AGENTS.md` is its manual. |
 | `workspace/tools/NAME.py` | One tool per file: `def NAME(ctx, ...)`. `workspace/tools/util/` is shared code (IK, planning, camera models, tracker, chess, strokes). |
-| `workspace/robot_config/` | URDF, camera calibrations (`camera_top.json`, `camera_wrist.json`), resting pose. |
+| `workspace/robot_config/` | URDF, camera calibrations (`camera_top.json`, `camera_wrist.json`), resting pose, `motion.json` (how much slower a blocked move is tried again). |
 | `workspace/state/` | What tasks remember between calls (`chess.json`, `drawing.json`). Not committed. |
 | `src/elrobot/` | The robot side: daemon, servo link, kinematics, simulator. Owns the arm; takes joint commands. |
 | `station/` | NormaCore Station config. The Station binary (`bin/station`) is built separately. |
 | `scripts/` | Bring-up helpers: `probe.py`, `cameras_ready.sh`, `calibrate.py`, `calibrate_camera.py`. |
 | `tests/` | Simulator tests. `uv run --with pytest pytest -q`, about 5 minutes. |
+| `workspace/tests/` | Tests of workspace code with the daemon faked, no robot and no simulator. `cd workspace && uv run --with pytest pytest -q tests`, under a second. |
 
 ## Starting it
 
@@ -93,7 +121,10 @@ cd workspace && claude          # or any agent; it reads AGENTS.md
   (measured by the wrist-camera calibration, see `CLAUDE.md`). The top camera also reads an object
   1 to 1.5 cm too far along the reach; `pick_verified` takes that out.
 - **Reach on the table** is roughly 9 to 36 cm from the base. One `place_at` 13 cm in front of the base was
-  refused as blocked on joint 2.
+  refused as blocked on joint 2 (before blocked moves were tried again slower; not repeated since).
+- **The slower second try has not run on the real arm.** That a blocked move goes through slower was seen by
+  hand; the automatic retry is covered by `workspace/tests/test_blocked_retry.py` only. It also cannot tell
+  load from an obstacle: against a real obstacle the arm pushes a second time, slower, before the error.
 - **The top camera's position** (79 cm above the mat, from the tag homography) is probably off: the mask that
   hides the arm from `find_objects` no longer covers it, so arm parts appear as grey objects.
 - **Chess** identifies squares as empty, light piece or dark piece; piece types come from the tracked game,
