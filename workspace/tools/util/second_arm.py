@@ -75,7 +75,11 @@ READY = np.radians([0.0, -45.0, 45.0, 75.0, 0.0])  # its daemon's ready pose (ho
 
 
 def joints_now() -> np.ndarray:
-    return np.array([j["q"] for j in state()["joints"][:5]], dtype=float)
+    """The second arm's five joint angles. Raises if its daemon has no arm: unplugged, or not powered."""
+    joints = state().get("joints") or []
+    if len(joints) < 5:
+        raise RobotError("the second arm's daemon is running but sees no arm: is the SO-101 plugged in and powered?")
+    return np.array([j["q"] for j in joints[:5]], dtype=float)
 
 
 def move_checked(root: Path, way, this_q, speed: float = 0.5, grippers_may_meet: bool = False) -> None:

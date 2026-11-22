@@ -201,9 +201,9 @@ class Arm:
         from util import second_arm, shared_space  # here, not at the top: they import this module
 
         try:
-            other = [j["q"] for j in second_arm.state()["joints"][:5]]
+            other = second_arm.joints_now()
         except RobotError:
-            other = None  # its daemon is not answering: the things on the table still count
+            other = None  # its daemon is not answering, or the arm is unplugged: the things on the table still count
         p = np.asarray(path, dtype=float)
         here = np.array([j["q"] for j in state["joints"][:7]], dtype=float)
         space, whole = shared_space.space(root), [here, *(p[None] if p.ndim == 1 else p)]

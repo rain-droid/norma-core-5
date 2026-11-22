@@ -21,6 +21,8 @@ and sends the robot one thing only, joint commands.
 
 `docs/FEATURES.md` says how far each part is proven.
 
+![Both arms and the scanned things in the web UI's 3D view](docs/images/two_arm/webui_two_arms.jpg)
+
 ## Run it
 
 ```bash
@@ -45,6 +47,7 @@ uv run --with pytest pytest tests -q                       # simulator tests, ab
 | Tools, joint commands, files, frames, units | `docs/INTERFACE.md` |
 | The daemon's HTTP and WebSocket API | `docs/API.md` |
 | The second arm, the depth camera, the shared space | `docs/SECOND_ARM.md` |
+| Pictures and measurements from the real table | `docs/RESULTS.md` |
 | How an agent operates the arm | `workspace/AGENTS.md`, `workspace/skills/` |
 | Current state and next steps | `docs/HANDOFF.md`, `docs/PLAN.md` |
 

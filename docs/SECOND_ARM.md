@@ -2,7 +2,10 @@
 
 The ElRobot shares its table with a second arm: an SO-101 with the same parallel gripper and wrist camera
 mount, standing 29 cm to its right. This page says how to start it, what the tools do, and how far each part
-is proven. Reasons are in `docs/DECISIONS.md`; the history is in `docs/CHANGELOG.md`.
+is proven. Reasons are in `docs/DECISIONS.md`; the history is in `docs/CHANGELOG.md`; pictures and the full
+set of measurements are in `docs/RESULTS.md`.
+
+![Both arms and the scanned things in the web UI's 3D view](images/two_arm/webui_two_arms.jpg)
 
 ## Start
 
