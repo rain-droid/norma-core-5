@@ -1,7 +1,7 @@
 # ElRobot workspace
 
 You are in the working directory of a robot arm: a NormaCore ElRobot, seven joints and a
-parallel gripper, on a table, with a camera across the table (`top`) and one on its wrist.
+parallel gripper, on a table, with a camera above the table (`top`) and one on its wrist.
 Everything you need to operate it is in this directory, as files.
 
 **The robot understands one thing: joint commands.** Seven joint angles in radians and a jaw
@@ -17,6 +17,7 @@ around it and send joint angles yourself.
 | `perception/` | The live senses, rewritten twice a second and after every command: `latest.json`, `exteroception/{top,wrist}/rgb.jpg`, `proprioception/state.json`. While the tracker runs, also `exteroception/tracks.json`: every object on the table by name, ten times a second. |
 | `skills/` | Task procedures in Markdown, written from experience with this arm. Take up the one that fits before starting (`activate_skill`). |
 | `tool_call_history/` | One folder per call: `input.json`, `result.json`, `joint_commands.jsonl` (every command sent), images. |
+| `state/` | What a task remembers between calls: the chess game and board (`chess.json`), the drawing, sheet and pen (`drawing.json`). Delete a file to forget it. |
 
 `perception/proprioception/state.json` says whether this is the real arm or a simulation
 (`"mode": "real"` or `"sim"`). Work the same way in both.
@@ -47,6 +48,10 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Gripper | `open_gripper`, `close_gripper` | jaws only |
 | Whole manipulations, by tracked name | `pick_object`, `place_object` | yes |
 | Whole manipulations, by position | `pick_at`, `place_at` | yes |
+| A pick the wrist camera checks before and after | `pick_verified` | yes |
+| Choosing a grasp among neighbours | `plan_grasp` | only with `pick: true` |
+| Chess on a physical board | `chess_setup`, `chess_see`, `chess_move`, `chess_record` | `chess_move`; `chess_setup` and `chess_see` turn the arm aside |
+| Drawing with a pen | `draw_plan`, `draw_pen`, `draw_run` | `draw_pen`, `draw_run` |
 | Poses and safety | `home`, `rest`, `stop` | `stop` always works |
 | Skills | `activate_skill`, `deactivate_skill` | no |
 
@@ -88,8 +93,9 @@ on its behalf, but it only knows about the arm and the table, not about objects 
 
 - Only the newest image shows the present. After any motion, by you or by a person at the
   table, look again before choosing a point. Never reuse a pixel or a position from before.
-- Measure with the `top` camera. It is calibrated against the mat; it faces the robot, so the
-  robot's right is on the left of its image. The `wrist` camera is for looking closely and
+- Measure with the `top` camera. It is calibrated against the mat; it hangs 79 cm above
+  the mat, with the robot at the right edge of its image reaching towards the left: the robot's
+  forward is image-left and its right is image-up. The `wrist` camera is for looking closely and
   for checking a grasp; positions from it are centimetres off on the real arm.
 - A pixel belongs to its capture. Give `pixel_to_table` the `image_id` it came from; pixel
   coordinates are those of the unmodified image, and `rgb_grid.jpg` has gridlines to read from.

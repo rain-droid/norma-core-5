@@ -26,9 +26,22 @@ the table's own colour and black things on the dark mat are not seen):
    `image_id`. Either click where the object meets the table (height 0; that is its near edge,
    so add half its depth away from the camera), or click the centre of its top face and give
    its height. Open `click_image` to confirm the crosshair is where you meant.
-7. `pick_at` with that `x`, `y`, and `place_at`. These check nothing, so look after each:
+7. `pick_verified` with that `x`, `y` and the object's height: it is `pick_at` with two looks
+   through the wrist camera. From the hover point it measures how far the object is from where
+   the jaws aim and lines up on it (`alignment_mm`, `corrections_mm`); after lifting it checks
+   the object is between the fingers (`seen_in_jaws`). Open `before_image` and `after_image`.
+   On this arm the top camera's position for an object is 1 to 2 cm off along the reach, and
+   this is what takes that out. Plain `pick_at` remains for what the wrist camera cannot see
+   (black or mat-coloured things). Then `place_at`. These check nothing, so look after each:
    `holding` true with a `width_mm` that matches the object, then `find_objects`. For
    stacking with `place_at`, `z` is the height of the object underneath.
+
+When objects stand close together, or the object is long or lies at an angle:
+
+8. `find_objects` (or `track_objects`), then `plan_grasp` with the object's id. It compares
+   jaw directions, grip points and heights against the neighbours and the arm's reach, and
+   says why it rejects the ones it does. Open `grasp_image`. `pick: true` performs the best
+   one, opening the jaws only as far as it needs. If nothing survives, move a neighbour first.
 
 What the errors mean:
 

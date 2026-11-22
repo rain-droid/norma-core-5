@@ -118,6 +118,8 @@ class SimWorld:
             if any(p is None for p in px):
                 continue
             pts = np.array(px, dtype=np.float32)
+            if not np.all(np.isfinite(pts)) or np.abs(pts).max() > 20 * max(cam.width, cam.height):
+                continue  # at the lens itself a distorted camera model projects to nowhere: nothing to draw
             side = tuple(int(c * 0.6) for c in b.bgr)
             cv2.fillConvexPoly(img, cv2.convexHull(pts).astype(np.int32), side, cv2.LINE_AA)
             cv2.fillConvexPoly(img, pts[4:].astype(np.int32), b.bgr, cv2.LINE_AA)
