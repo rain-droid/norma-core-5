@@ -15,6 +15,11 @@ An object keeps its id for as long as it is on the table. Its `state` is one of
   missing  its place is in view and empty; forgotten after two minutes
 An object put down on another one gets `on` (the id underneath) and travels with it. One that
 turns up somewhere else after being out of sight is recognised by its colour.
+`on_source` says how `on` is known. "placed": the arm let go of it there. "inferred": nobody
+saw it put there, but it went missing and has not turned up, and the other one looks different
+since (`on_evidence`: "colour", "area", "height", or "place" when the upper one now stands where
+the lower one stood). That is a conclusion (Watcher._piles): two objects laid against each other
+look the same from above. It is taken back when the lower one looks undisturbed again.
 
 `intrusion` is set while something is moving on the table that the arm did not move: a thing
 coming in over the edge of the searched area, something new appearing, a tracked object
@@ -77,6 +82,12 @@ LAG_LOOKS = 3  # the camera runs behind the joint angles: the arm is masked wher
 RENAME_LOOKS = 10  # looks in a row a track must read as another colour than its name before it is renamed
 GRIP_REACH = 0.04  # m: when the jaws close on something, it is the track this close to the tool point
 STACK_REACH = 0.03  # m: let go this close above another track means put down on it
+STACK_WINDOW = 60.0  # seconds after a track went missing in which another one's changed look can explain where it went
+PILE_STILL = 0.8  # seconds an outline must have lain still before it is compared with how it looked undisturbed
+CALM_LOOKS = 10  # looks in a row lying still before how a track looks is taken as its undisturbed look
+GREW, TALLER_MM = 1.2, 10  # outline area (as a factor) and height beyond the undisturbed look that say something is on it
+ON_ITS_PLACE = 30  # pixels: an outline that arrived this close to where a missing track stood is standing on it
+RENAME_QUIET_S = 3.0  # seconds of quiet before a changed colour is a new name and no longer a possible pile
 
 
 def _apart(a, b) -> float:
@@ -241,9 +252,13 @@ class Watcher:
         # Named for the colour it first showed. Two things touching are one outline with one
         # (mixed) colour, and one of them keeps the name when they part: so a name that has not
         # fitted for a second is replaced by one that does. What carries others reads as a mixture.
-        fits = d["color"] == t["color"] or any(o["on"] == t["id"] for o in self.tracks)
-        t["misnamed"] = 0 if fits else t["misnamed"] + 1
-        if t["misnamed"] >= RENAME_LOOKS:
+        carrying = any(o["on"] == t["id"] for o in self.tracks)
+        t["odd"] = 0 if d["color"] == t["color"] else t["odd"] + 1
+        t["misnamed"] = 0 if carrying else t["odd"]
+        # Not while a track has just gone missing: the other colour may be that one lying on this
+        # one (_piles), which is found out once the table is quiet.
+        maybe_pile = self._lost(now) and (self.intrusion is not None or now - self.clear_since < RENAME_QUIET_S)
+        if t["misnamed"] >= RENAME_LOOKS and not maybe_pile:
             self._name(t, d["color"])
         if elsewhere or (t["recent"] and _px(d, t) > MOVED):
             if t.get("state") == "visible" and now - t["seen_t"] < 0.35:  # it was in plain view a look ago: nothing hid it, something moved it
@@ -252,6 +267,7 @@ class Watcher:
             t["moved_t"] = now
             t["moves"] += 1
         t["recent"].append(d)
+        t["reads"] = d["color"]
         # Where the outline is centred in the image is steady to a pixel while the object lies
         # still. Where it stands on the table is worked out from the outline's shape and wanders
         # by centimetres for anything that is not a plain box, so that is taken as the median
@@ -263,11 +279,80 @@ class Watcher:
         heights = [r["height_mm"] for r in t["recent"] if r["height_mm"] is not None]
         if len(heights) * 2 > len(t["recent"]):  # only objects with a flat, lit top have a height to measure
             t["height_mm"] = round(float(np.median(heights)))
+        # How it looks lying undisturbed, by itself: what a later look is compared with to tell that
+        # something has been put on it. Left alone while a track is missing, so that it always
+        # dates from before that one went.
+        if not t["odd"] and not carrying and not t["on"] and len(t["recent"]) >= CALM_LOOKS and not self._lost(now, going=True):
+            t["calm"] = {"area_px": float(np.median([r["area_px"] for r in t["recent"]])), "height_mm": t["height_mm"], "u": t["u"], "v": t["v"]}
 
     def _name(self, t: dict, colour: str) -> None:
         word = colour or "object"
         self.numbers[word] = self.numbers.get(word, 0) + 1
-        t.update(id=f"{word}-{self.numbers[word]}", color=colour, misnamed=0)
+        t.update(id=f"{word}-{self.numbers[word]}", color=colour, misnamed=0, odd=0)
+
+    # ---- piles nobody told us about
+
+    def _lost(self, now: float, going: bool = False) -> list[dict]:
+        """Tracks that went missing a short while ago and have not been explained, newest first.
+        With `going`, also those whose place has been empty for a look or more."""
+        lost = [t for t in self.tracks if not t["on"] and now - t["seen_t"] < STACK_WINDOW
+                and (t["state"] == "missing" or (going and t["state"] == "visible" and t.get("misses", 0) > 0))]  # fmt: skip
+        return sorted(lost, key=lambda t: -t["seen_t"])
+
+    def _changed(self, t: dict) -> list[str]:
+        """In what a track differs from how it looked lying undisturbed: the signs of something on it."""
+        calm, why = t["calm"] or {}, []
+        if t["odd"] >= CONFIRM:
+            why.append("colour")
+        if calm and _px(calm, t) > SAME_SPOT:
+            return why  # it has been moved since: from another place the same object has another outline
+        if calm.get("area_px") and t["area_px"] > GREW * calm["area_px"]:
+            why.append("area")
+        if calm.get("height_mm") and t["height_mm"] and t["height_mm"] >= calm["height_mm"] + TALLER_MM:
+            why.append("height")
+        return why
+
+    def _off(self, t: dict) -> None:
+        t.update(on=None, on_source=None, on_evidence=None, z_mm=0, doubt=0)
+
+    def _piles(self, now: float) -> None:
+        """Objects do not vanish. A track that is gone from its place and has not turned up
+        anywhere, while another outline has changed since (another colour, larger, taller), is
+        taken to lie on that one: `on`, with `on_source: "inferred"` because nobody saw it put
+        there (the arm's own stacking is "placed"). Two ways it shows:
+          * the pile is still matched to the track underneath, and the upper one is missing;
+          * the pile reads as the upper one, which seems to have moved onto the place of the
+            lower one, and the lower one is missing: then the lower one is given its place back.
+        Laid against each other, two objects look the same from above as one on the other."""
+        # an inferred pile whose base looks undisturbed again was none
+        for t in self.tracks:
+            base = next((b for b in self.tracks if b["id"] == t["on"]), None) if t["on_source"] == "inferred" else None
+            if base and base["state"] == "visible" and now - base["moved_t"] > PILE_STILL:
+                t["doubt"] = 0 if self._changed(base) else t["doubt"] + 1
+                if t["doubt"] >= CALM_LOOKS:
+                    self._off(t)
+                    t.update(state="missing", misses=GONE_AFTER)
+        if self.intrusion is not None:
+            return  # a hand is still at it
+        for b in self.tracks:
+            lost = [m for m in self._lost(now) if m is not b]
+            if not lost or b["state"] != "visible" or b["on"] or now - b["moved_t"] < PILE_STILL:
+                continue
+            under = next((m for m in lost if _px(m, b) < ON_ITS_PLACE and b["moved_t"] > m["seen_t"] - 1.0), None)
+            if under:  # b came to stand where `under` stood
+                surface = under["height_mm"] or 0  # its own height, as last measured while it stood alone
+                keep = ("x", "y", "u", "v", "pixel", "polygon", "box", "seen_t", "area_px", "yaw_deg", "width_mm", "footprint_mm")
+                under.update({k: b[k] for k in keep}, state="visible", misses=0, moved_t=now, odd=0, misnamed=0)
+                under["recent"].clear()
+                b.update(on=under["id"], on_source="inferred", on_evidence=["place", *(w for w in self._changed(b) if w != "colour")], z_mm=surface, doubt=0)
+                continue
+            why = self._changed(b)
+            if not why:
+                continue
+            top = next((m for m in lost if m["color"] == b["reads"]), lost[0])
+            # how high the lower one is: as it was measured alone, else the pile less the upper one
+            surface = (b["calm"] or {}).get("height_mm") or (max(0, b["height_mm"] - top["height_mm"]) if b["height_mm"] and top["height_mm"] else 0)
+            top.update(on=b["id"], on_source="inferred", on_evidence=why, z_mm=surface, doubt=0)
 
     def _match(self, seen: list[dict], near, boxes: list, now: float) -> None:
         riders = {t["on"] for t in self.tracks if t["on"]}
@@ -292,7 +377,7 @@ class Watcher:
                 t = min(lost, key=lambda t: _px(t, d))
                 taken_d.add(j)
                 taken_t.update(i for i, other in enumerate(loose) if other is t)
-                t["on"], t["z_mm"] = None, 0
+                self._off(t)
                 self._sighting(t, d, now, elsewhere=True)
         for i, t in enumerate(loose):
             if i in taken_t:
@@ -314,17 +399,20 @@ class Watcher:
             if d["looks"] < CONFIRM:
                 again.append(d)
                 continue
-            t = {"height_mm": None, "on": None, "z_mm": 0, "moved_t": now, "moves": 0, "recent": deque(maxlen=25)}
+            t = {"height_mm": None, "on": None, "on_source": None, "on_evidence": None, "z_mm": 0, "moved_t": now, "moves": 0,
+                 "recent": deque(maxlen=25), "calm": None, "odd": 0, "doubt": 0, "reads": d["color"]}  # fmt: skip
             self._name(t, d["color"])
             self._sighting(t, d, now)
             self.tracks.append(t)
         self.maybe = again
+        self._piles(now)
         for t in self.tracks:  # what was put on something goes where that goes
             base = next((b for b in self.tracks if b["id"] == t["on"]), None) if t["on"] else None
             if base:
                 t.update(x=base["x"], y=base["y"], u=base["u"], v=base["v"], pixel=base["pixel"], state=base["state"], seen_t=base["seen_t"], moved_t=max(t["moved_t"], base["moved_t"]))
             elif t["on"]:
-                t["on"], t["state"] = None, "missing"
+                self._off(t)
+                t["state"] = "missing"
 
     def _gripper(self, gripping: bool, tcp, now: float) -> None:
         held = next((t for t in self.tracks if t["id"] == self.holding), None)
@@ -336,7 +424,8 @@ class Watcher:
             held = min(reach, key=lambda t: _apart(t, at), default=None)
             self.holding = held["id"] if held else ""
             if held:
-                held.update(state="held", on=None, z_mm=0)
+                self._off(held)
+                held["state"] = "held"
         if held and gripping:
             u, v = (float(c) for c in self.cam.to_pixel(tcp))
             held.update(x=round(float(tcp[0]), 3), y=round(float(tcp[1]), 3), u=u, v=v, pixel=[round(u), round(v)], seen_t=now, moved_t=now)
@@ -348,12 +437,13 @@ class Watcher:
                 # how high the surface it was put on is: place_at opens the jaws with the tool point 22 mm above it
                 surface = max(0, round((float(tcp[2]) - self.table_z) * 1000 - 22)) if base is not None and tcp is not None else 0
                 u, v = (float(c) for c in self.cam.to_pixel([held["x"], held["y"], self.table_z + surface / 1000 + 0.012]))  # about where its outline will be centred
-                held.update(state="hidden", misses=0, moved_t=now, moves=held["moves"] + 1, u=u, v=v, on=base["id"] if base else None, z_mm=surface)
+                held.update(state="hidden", misses=0, moved_t=now, moves=held["moves"] + 1, u=u, v=v, on=base["id"] if base else None, z_mm=surface,
+                            on_source="placed" if base else None, on_evidence=None)
 
     # ---- what goes out
 
     def _report(self, now: float) -> dict:
-        keys = ("id", "color", "state", "x", "y", "yaw_deg", "width_mm", "footprint_mm", "height_mm", "on", "z_mm", "moves", "pixel", "box", "area_px")
+        keys = ("id", "color", "state", "x", "y", "yaw_deg", "width_mm", "footprint_mm", "height_mm", "on", "on_source", "on_evidence", "z_mm", "moves", "pixel", "box", "area_px")
         tracks = [{**{k: t[k] for k in keys}, "still_s": round(now - t["moved_t"], 1), "seen_s": round(now - t["seen_t"], 1)} for t in self.tracks]
         lying = [e for e in self.edge if e["looks"] >= 10 and e["unseen"] < 3]
         return {
@@ -370,7 +460,7 @@ class Watcher:
 
     def _picture(self, img: np.ndarray) -> np.ndarray:
         colours = {"visible": (120, 255, 120), "hidden": (160, 160, 160), "held": (80, 220, 255), "missing": (90, 90, 255)}
-        marks = [{"label": f"{t['id']} {t['state']}" + (f" on {t['on']}" if t["on"] else ""), "point": t["pixel"], "bgr": colours[t["state"]],
+        marks = [{"label": f"{t['id']} {t['state']}" + (f" on {t['on']}{'?' if t['on_source'] == 'inferred' else ''}" if t["on"] else ""), "point": t["pixel"], "bgr": colours[t["state"]],
                   "polygon": t["polygon"] if t["state"] == "visible" and not t["on"] else None} for t in self.tracks]  # fmt: skip
         marks += [{"label": "at the edge: not tracked" if e["looks"] >= 10 else "", "box": e["box"], "bgr": (0, 160, 255) if e["looks"] >= 10 else (0, 0, 255)} for e in self.edge if not e["unseen"]]
         if self.intrusion:

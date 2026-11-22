@@ -5,6 +5,19 @@ today is in `docs/FEATURES.md`. Add an entry with each push.
 
 ## 2026-11-22
 
+### Tracker concludes piles it did not see being built
+Modified by: Arian Malekzadeh
+
+- Two objects on each other are one outline from above. Until now the tracker only knew a pile when the arm
+  had built it. Now a track that goes missing without turning up elsewhere, while another outline has changed
+  since (colour, area, height, or it stands in the missing one's place), is reported as lying on that one:
+  `on`, with `on_source: "inferred"` and `on_evidence`. A pile the arm built has `on_source: "placed"`.
+- The lower object keeps its name (it used to be renamed to the pile's colour after a second), and the upper
+  one is no longer forgotten as `missing`. Taken off and put elsewhere, it is found again and `on` is cleared.
+- `docs/OVERLAPPING_OBJECTS.md`: the plan for this and for the second half, a close look with the wrist camera
+  when the tracker is unsure (not built yet).
+- Test in `tests/test_workspace.py`, simulator only. Not run on the real arm.
+
 ### Web UI: camera switcher and live vision layers
 Modified by: Atharva Bhorpe
 

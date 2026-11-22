@@ -48,25 +48,30 @@ before and after. The rule is conservation:
 
 Details:
 
-- [ ] **Undisturbed look.** Each track keeps how it looked while lying still and unremarkable (`calm`: outline
+- [x] **Undisturbed look.** Each track keeps how it looked while lying still and unremarkable (`calm`: outline
       area, height). It is not updated while any track is missing and unexplained, so the comparison is
-      always with the time before A went away.
-- [ ] **No renaming while a pile may be forming.** A track whose colour stops fitting is not renamed while a
+      always with the time before A went away. It belongs to the place where it was taken: area and height
+      only count as evidence while B has not been moved, because the same object has another outline elsewhere.
+- [x] **No renaming while a pile may be forming.** A track whose colour stops fitting is not renamed while a
       track went missing in the last `STACK_WINDOW` seconds: the changed colour is evidence, not a new name.
-- [ ] **The conclusion** as above, once B has lain still for a moment and nothing is moving on the table. If
+- [x] **The conclusion** as above, once B has lain still for a moment and nothing is moving on the table. If
       several tracks are missing, the one whose colour B now shows is taken, else the one lost last.
       At most one new rider per base and look.
-- [ ] **Taking it back.** A reappearing elsewhere already clears `on` (existing code: "fell off what it was put
+- [x] **Taking it back.** A reappearing elsewhere already clears `on` (existing code: "fell off what it was put
       on"). In addition an inferred pile whose base looks undisturbed again (its evidence gone for a second)
       is dissolved, and A is `missing` again.
-- [ ] **Report.** `on_source` and `on_evidence` in `tracks.json` and `track_objects`; the picture labels an
+- [x] **Report.** `on_source` and `on_evidence` in `tracks.json` and `track_objects`; the picture labels an
       inferred pile `on blue-1?`. `pick_object` needs no change: it already takes the rider from the top of
       the pile, at `z_mm` (the base's height when known).
-- [ ] **Test** in the simulator (`tests/test_workspace.py`): a block is moved onto another without the arm;
+- [x] **Test** in the simulator (`tests/test_workspace.py`): a block is moved onto another without the arm;
       the tracker reports `on` with `on_source: "inferred"`, the base keeps its name; the block taken off and
       put elsewhere is found again and `on` is cleared; a block that is simply removed stays `missing`.
-- [ ] Docstrings (`tracker.py`, `track_objects.py`), `skills/pick-and-place`, `docs/FEATURES.md`,
+- [x] Docstrings (`tracker.py`, `track_objects.py`), `skills/pick-and-place`, `docs/FEATURES.md`,
       `docs/CHANGELOG.md`.
+
+Built on 2026-11-22 (`Watcher._piles`), tested in the simulator only. One addition to the rule: when the pile
+reads as the upper object, the tracker first sees A "move" onto B's place and B go missing. That is turned
+round: B gets its place back and A is on it, with `on_evidence: ["place"]`.
 
 What it will not do:
 
