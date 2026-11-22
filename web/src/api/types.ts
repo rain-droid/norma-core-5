@@ -71,6 +71,20 @@ export interface CameraInfo {
   age_ms: number;
 }
 
+/** The second arm (an SO-101 on its own daemon), as this daemon relays it for the twin. */
+export interface SecondArmState {
+  robot: string | null;
+  /** URDF served through this daemon. */
+  urdf: string;
+  /** Its base in this arm's base frame, row-major 4x4; null until it has been fitted. */
+  T: number[][] | null;
+  connected: boolean;
+  torque: boolean;
+  activity: string | null;
+  joints: { id: number; name: string; q: number; q_goal: number; error: number }[];
+  gripper: { open: number; holding?: boolean } | null;
+}
+
 export interface RobotState {
   type: 'state';
   t: number;
@@ -78,8 +92,6 @@ export interface RobotState {
   connected: boolean;
   calibrated: boolean;
   torque: boolean;
-  /** Collaboration mode: softer, slower, backs off when touched. Absent on an older daemon. */
-  collab?: boolean;
   busy: boolean;
   activity: string;
   source: Source | null;
@@ -87,6 +99,8 @@ export interface RobotState {
   gripper: GripperState;
   ee: EndEffector;
   cameras: CameraInfo[];
+  /** Absent when no second arm is configured, null while its daemon is not answering. */
+  second_arm?: SecondArmState | null;
 }
 
 interface EventBase {
@@ -124,6 +138,16 @@ export interface PlanEvent extends EventBase {
   call_id: string;
   path: Vec3[];
   target: PlanTarget | null;
+}
+
+/** Things on the table as the depth camera saw them: one column per cell that has something on it. */
+export interface ObstaclesEvent extends EventBase {
+  kind: 'obstacles';
+  /** Side of a cell, metres. */
+  cell: number;
+  table_z: number;
+  /** x, y of the cell's middle (base frame) and the height of what stands there above the table. */
+  boxes: [number, number, number][];
 }
 
 export interface WorldMarker {
@@ -225,6 +249,7 @@ export type RobotEvent =
   | ToolStartEvent
   | ToolEndEvent
   | PlanEvent
+  | ObstaclesEvent
   | MarkersEvent
   | DetectionsEvent
   | LogEvent

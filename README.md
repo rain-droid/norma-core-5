@@ -15,6 +15,9 @@ and sends the robot one thing only, joint commands.
   move that was stopped as blocked once more, slower.
 - Chess against a person, drawing with a pen, and grasp planning among neighbours: in the simulator so far.
 - A web UI, an MCP server and a voice agent on the same daemon.
+- A depth camera across the table measures heights and keeps what stands on the mat as obstacles.
+- A second arm (an SO-101) shares the table: both arms live in one collision-checked model, shown together in
+  the web UI's 3D view, and the ElRobot can hand a cube to it in the air. See `docs/SECOND_ARM.md`.
 
 `docs/FEATURES.md` says how far each part is proven.
 
@@ -26,6 +29,7 @@ cd workspace && claude          # or any coding agent; it reads AGENTS.md
 ```
 
 For the real arm: build the Station (see `CLAUDE.md`), then `scripts/cameras_ready.sh` and `pixi run up`.
+With the second arm: `scripts/second_arm_up.sh` in another terminal.
 
 ```bash
 uv run --with pytest pytest tests -q                       # simulator tests, about 5 minutes
@@ -40,6 +44,7 @@ uv run --with pytest pytest tests -q                       # simulator tests, ab
 | Why is it built this way? | `docs/DECISIONS.md` |
 | Tools, joint commands, files, frames, units | `docs/INTERFACE.md` |
 | The daemon's HTTP and WebSocket API | `docs/API.md` |
+| The second arm, the depth camera, the shared space | `docs/SECOND_ARM.md` |
 | How an agent operates the arm | `workspace/AGENTS.md`, `workspace/skills/` |
 | Current state and next steps | `docs/HANDOFF.md`, `docs/PLAN.md` |
 

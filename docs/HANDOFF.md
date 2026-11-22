@@ -1,4 +1,29 @@
-# Handoff (2026-11-22, about 04:30)
+# Handoff (2026-11-22, about 15:30)
+
+**State.** Branch `idea-1-arav`, pushed. Two arms on the table: the ElRobot and an SO-101 (`docs/SECOND_ARM.md`).
+An Orbbec depth camera stands across the table. Both arms are in one collision-checked model and in the web
+UI's 3D view, with the things on the mat as obstacles. The ElRobot hands a 3 cm cube to the SO-101 in the air
+about two times in three. Stacking by the SO-101 was tried and did not work. Both arms were left at home.
+
+**To start:** `scripts/cameras_ready.sh && pixi run up` in one terminal, `scripts/second_arm_up.sh` in
+another. Both in terminals of your own: started from an agent session they are ended after two hours.
+`scripts/orbbec_setup.sh` once per machine.
+
+**Not yet seen working:** the obstacle columns and the SO-101's planned path in the 3D view (written after
+the daemon was last restarted); the daemon's own copy of the wrist-camera collision part (the same: it loads
+at the next start); the wrist-turning step of `hand_over` for long things; `record_poses` played back in full
+by `replay_poses` (the hand-over part of it is what `hand_over` uses).
+
+**The full simulator test suite** was started twice on the afternoon of the 22nd while both real daemons were
+running and did not finish within 15 minutes the first time; see the commit message for the second. The
+workspace tests (35) and the kinematics and second-arm tests pass.
+
+**Next:** see "Two arms" in `docs/PLAN.md`. The first item, fitting the SO-101 at table level, unblocks the
+stacking.
+
+---
+
+# Earlier handoff (2026-11-22, about 04:30)
 
 **State.** Branch `idea-1-arav`, pushed. Real arm working on Linux: Station at 1280x720 with three cameras
 (`top` = UGREEN above the mat, `wrist`, `across`), top camera recalibrated, `base_in_mat` refitted, wrist

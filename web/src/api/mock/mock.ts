@@ -107,7 +107,6 @@ export class MockTransport implements Transport {
   private gripError = 0;
 
   private torqueOn = true;
-  private collabOn = false;
   private busy = false;
   private activity = 'idle';
   private source: Source | null = null;
@@ -278,7 +277,6 @@ export class MockTransport implements Transport {
       connected: true,
       calibrated: true,
       torque: this.torqueOn,
-      collab: this.collabOn,
       busy: this.busy,
       activity: this.activity,
       source: this.busy ? this.source : null,
@@ -844,10 +842,6 @@ export class MockTransport implements Transport {
     this.voice('idle');
     this.torqueOn = enable;
     if (enable) this.startDemo(8000);
-  }
-
-  async collab(enable: boolean): Promise<void> {
-    this.collabOn = enable;
   }
 
   async chat(text: string): Promise<ChatResult> {

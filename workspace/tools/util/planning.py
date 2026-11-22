@@ -23,6 +23,16 @@ from util.motion import READY_DEG
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# How much higher than asked the real arm's tool point is sent when it comes down on something
+# (approach_for), in metres. Its fingertips are lower than the model says. Measured 2026-11-22 by
+# lowering the open jaws in 2 mm steps until the measured height stopped following the command:
+# they met the mat when the model had the tool point about 25 mm above it, at 20 cm and at 33 cm
+# from the base alike, and the model has the fingertips 12 mm below the tool point: about 13 mm
+# out. Picks at 20 to 22 mm and releases at 22 mm therefore pressed the fingers 3 to 5 mm into
+# the mat, and closing the jaws there tore it. With 10 mm the fingertips keep about 5 mm of air
+# at the lowest grasp. Not applied in the simulation, whose arm is exactly the model.
+REAL_ARM_LIFT = 0.010
+
 
 class Planner:
     def __init__(self, arm: Arm):
@@ -30,6 +40,7 @@ class Planner:
         self.arm = arm
         self.table_z: float = meta["table_z"]  # height of the table surface in the base frame
         self.envelope: dict = meta["clearance"]  # floor, body, min_y, limit_margin: what the robot side enforces
+        self.lift: float = REAL_ARM_LIFT if meta.get("mode") == "real" else 0.0
         self.margin: float = self.envelope["limit_margin"]  # rad kept clear of each joint limit when planning
         self.kin = Kinematics(ROOT / "robot_config" / "model.urdf")
         self.kin.set_limits(*arm.limits())
@@ -59,10 +70,6 @@ class Planner:
     def reach(self, pos, *, yaw: float | None = None, pitches=(90, 75, 60, 45, 30, 15), **kw) -> tuple[IKResult, float | None]:
         """Try progressively flatter approaches until one reaches `pos`: straight-down poses only
         exist close in, further out the gripper has to lean forward."""
-        from util import safe
-
-        if safe.enabled():
-            pitches = (90,)  # straight down, or not reached
         best: IKResult | None = None
         for pitch in pitches:
             r = self.solve(pos, pitch=pitch, yaw=yaw, **kw)
@@ -94,31 +101,6 @@ class Planner:
                 raise RobotError(f"straight-line move rejected: {why}")
         return path
 
-    def _approach_straight_down(self, target, grasp: np.ndarray, grasp_z: float, yaw: float | None, seed: np.ndarray):
-        """approach_for in safe mode: straight down or not at all. The jaws are turned as asked,
-        or the half turn that is the same grasp, whichever the wrist can do. The hover point is
-        straight above the grasp at the carry height."""
-        from util import safe
-
-        a = safe.DOWN.copy()
-        hover_pos = np.array([grasp[0], grasp[1], max(grasp[2] + 0.02, self.table_z + safe.carry_height())])
-        last = None
-        want = 0.0 if yaw is None else float(yaw)
-        for turn in (want, want + 180.0):
-            jaw = jaw_from_yaw(a, turn)
-            rg = self.kin.ik(grasp, approach=a, jaw=jaw, q_seed=seed, limit_margin=self.margin, accept=lambda q: self.blocked(q, True) is None)
-            if not rg.ok:
-                last = rg
-                continue
-            rh = self.kin.ik(hover_pos, approach=a, jaw=jaw, q_seed=rg.q, limit_margin=self.margin, accept=lambda q: self.blocked(q, False) is None)
-            if rh.ok:
-                return a, 90.0, rh.q, hover_pos, grasp
-            last = rh
-        d = math.hypot(target[0], target[1] - 0.04)
-        where = (f"it is {d * 100:.0f} cm from the base" if d > 0.20 or d < 0.09 else "the wrist cannot turn the jaws that way there")
-        raise RobotError(f"too far for safe mode: can't come straight down on x={target[0]:+.3f} y={target[1]:+.3f} ({where}). "
-                         f"Pointing straight down the arm reaches {safe.AREA}. Ask for it to be moved closer; do not try another way.")  # fmt: skip
-
     def approach_for(self, target, grasp_z: float, yaw: float | None, hover: float = 0.07):
         """Choose how to come down on a table point.
 
@@ -126,14 +108,12 @@ class Planner:
         reaches both the grasp point (`grasp_z` above the table) and a hover point backed off
         `hover` metres along the approach. Straight-down only works within about 27 cm of the base.
 
+        On the real arm the grasp point is REAL_ARM_LIFT higher than `grasp_z`: see there.
+
         Returns (approach unit vector, pitch in degrees, hover joint angles, hover xyz, grasp xyz).
         """
-        grasp = np.array([target[0], target[1], self.table_z + grasp_z])
+        grasp = np.array([target[0], target[1], self.table_z + grasp_z + self.lift])  # see REAL_ARM_LIFT
         seed = np.radians(READY_DEG)
-        from util import safe
-
-        if safe.enabled():
-            return self._approach_straight_down(target, grasp, grasp_z, yaw, seed)
         last = None
         refused: list[str] = []  # what the envelope said about each pose IK reached but may not use
 

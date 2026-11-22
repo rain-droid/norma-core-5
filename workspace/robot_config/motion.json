@@ -1,7 +1,6 @@
 {
  "blocked_retry_speed": 0.5,
  "note": "A move the robot side stops as blocked is sent once more at this fraction of its speed (tools/util/arm.py). Between 0 and 1: 0.5 is half as fast, 1 the same speed again, 0 no second try.",
- "safe_mode": true,
- "carry_height": 0.065,
- "note_safe_mode": "safe_mode: the gripper only points straight down and only travels in straight lines (up, across, down); what cannot be reached that way is refused as too far (tools/util/safe.py). carry_height: metres above the table the tool point travels at; straight down the arm reaches no higher than about 0.07."
+ "speed_scale": 0.5,
+ "note_speed_scale": "speed_scale: every arm move runs at this fraction of the speed its tool asks for (tools/util/arm.py). 1 is normal; 0.5 is the slow, careful setting in use since 2026-11-22."
 }

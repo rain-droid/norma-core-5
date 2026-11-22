@@ -31,6 +31,8 @@ class Config:
     data_dir: Path = REPO_ROOT / "data"
     # RoboHarness-style agent workspace: tools, skills, live perception and call history as files.
     workspace_dir: Path = REPO_ROOT / "workspace"
+    # The second arm's daemon (scripts/second_arm_up.sh), watched for the digital twin. Empty: no second arm.
+    second_arm_url: str = "http://127.0.0.1:8770"
 
     # --- workspace
     table_z: float = 0.0  # table height in the base frame (base sits on the table)
@@ -64,18 +66,6 @@ class Config:
     stall_error: float = 0.22
     stall_time: float = 0.45
     stale_state_s: float = 0.4
-
-    # --- working next to people (collaboration mode; docs/DECISIONS.md says what it is and is not)
-    collab: bool = False  # on at start; POST /api/collab switches it while running
-    collab_torque_limit: int = 650  # arm torque limit (0..1000) while it is on: how hard the arm can push
-    collab_speed: float = 0.6  # motions run at no more than this fraction of their planned speed
-    # A touch shows as a joint's load, or its lag behind the command, stepping away from its own
-    # recent level. Gravity and the move itself change both slowly; a hand or an obstacle, at once.
-    # Measured on this arm (2026-11-22, twelve free moves): at the speed this mode allows, a move's own
-    # steps lasting four ticks stay under 141 load units and 0.05 rad; at full speed they reach 150 and 0.09.
-    collab_load_rise: float = 220.0  # servo load units (0.1 % of stall torque)
-    collab_lag_rise: float = 0.08  # rad: about 160 load units on these servos, a few hundred grams at the gripper
-    collab_backoff_s: float = 0.5  # how much of the path already travelled the arm retreats along after a touch
 
     # --- leading the arm by hand (POST /api/guide). The servos are soft (proportional only), so a
     # hand displaces a joint from where it is told to be; the command then follows the hand.

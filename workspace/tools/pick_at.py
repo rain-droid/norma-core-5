@@ -17,9 +17,10 @@ in; along the finger pads it stays wherever x, y put it.
 `yaw_deg` rotates the jaws about the vertical, in degrees; 0 closes left-right. Pass the
 `yaw_deg` find_objects reported so the jaws close across a flat side. The jaws open 53 mm.
 `grasp_height` is where the tool point ends up above the table: about half the object's height.
-The fingertips are 12 mm beyond the tool point and the stretched arm sags a few millimetres, so
+The fingertips are 12 mm beyond the tool point, so
 below 0.020 they press into the mat, so anything lower is raised to 0.020 (MIN_GRASP_HEIGHT; the
-result says so). A short object is then gripped by its upper part. Beyond about 27 cm the
+result says so). On the real arm the planner sends the tool point 10 mm higher than this again
+(REAL_ARM_LIFT in util/planning.py): its fingertips sit lower than the model says. A short object is then gripped by its upper part. Beyond about 27 cm the
 gripper has to lean, and leaning jaws that are also turned (`yaw_deg` not 0) dip one fingertip
 towards the table.
 
@@ -38,7 +39,7 @@ import numpy as np
 
 from util import capture, vision
 from util.arm import RobotError
-from util.motion import require_ready, tcp_report
+from util.motion import require_ready, tcp_report, carry
 
 MIN_GRASP_HEIGHT = 0.020  # metres above the table; lower values are raised to this
 
@@ -74,7 +75,7 @@ def pick_at(ctx, x: float, y: float, yaw_deg: float | None = None, grasp_height:
     approach, pitch, q_hover, hover_pos, grasp = plan.approach_for(target, grasp_height, yaw_deg)
     down = plan.line(q_hover, grasp, approach=approach, allow_low=True)
     arm.joints(gripper=1.0, label="opening")
-    arm.joints(q_hover, speed=0.9, label="reaching")
+    carry(ctx, q_hover, hover_pos, speed=0.9, label="reaching")  # over what stands on the way, when the table has been scanned
     if refine:
         for _ in range(2):
             better = refine_target(ctx, target)

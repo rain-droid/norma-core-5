@@ -1,5 +1,8 @@
 <?xml version="1.0" ?>
 <robot name="Elrobot" >
+ <material name="servo">
+  <color rgba="0.1 0.1 0.1 1.0"/>
+ </material>
   <material name="silver">
     <color rgba="0.700 0.700 0.700 1.000"/>
   </material>
@@ -519,4 +522,70 @@
     <limit upper="0.0255" lower="0.0" effort="2.94" velocity="4.71"/>
     <mimic joint="rev_motor_08" multiplier="0.0115" offset="0"/>
   </joint>
+
+  <!-- The wrist camera on its mount, on the parallel gripper: the same mount, in the same place on the same
+       gripper base, as on the SO-101 (taken from its URDF). The ElRobot's wrist camera calibration
+       (workspace/robot_config/camera_wrist.json) puts the camera where this does, to a centimetre. -->
+ <link name="camera_mount_link">
+  <visual>
+   <origin rpy="0 0 0" xyz="0 0 0"/>
+   <geometry>
+    <mesh filename="assets/CameraMount_square_27mm.stl" scale="0.001 0.001 0.001"/>
+   </geometry>
+   <material name="servo"/>
+  </visual>
+  <collision>
+   <origin rpy="0 0 0" xyz="0 0 0"/>
+   <geometry>
+    <mesh filename="assets/CameraMount_square_27mm.stl" scale="0.001 0.001 0.001"/>
+   </geometry>
+  </collision>
+ </link>
+ <joint name="camera_mount_joint" type="fixed">
+  <!-- Align the STL's 14 mm base-hole pair with the gripper's top screw holes. -->
+  <origin rpy="0.01753082 0.00902913 1.55365078" xyz="0.00054014 0.01591577 0.01510416"/>
+  <parent link="Gripper_Base_v1_1"/>
+  <child link="camera_mount_link"/>
+ </joint>
+ <link name="camera_link">
+  <visual>
+   <origin xyz="-0.0008 0 0"/>
+   <geometry>
+    <box size="0.0016 0.032 0.032"/>
+   </geometry>
+   <material name="servo"/>
+  </visual>
+  <collision>
+   <origin xyz="-0.0008 0 0"/>
+   <geometry>
+    <box size="0.0016 0.032 0.032"/>
+   </geometry>
+  </collision>
+  <visual>
+   <origin rpy="0 1.57079632679 0" xyz="0.0125 0 0"/>
+   <geometry>
+    <cylinder length="0.025" radius="0.008"/>
+   </geometry>
+   <material name="servo"/>
+  </visual>
+  <collision>
+   <origin rpy="0 1.57079632679 0" xyz="0.0125 0 0"/>
+   <geometry>
+    <cylinder length="0.025" radius="0.008"/>
+   </geometry>
+  </collision>
+ </link>
+ <joint name="camera_joint" type="fixed">
+  <!-- Center of the STL's 27 mm hole pattern; lens points toward the jaws. -->
+  <origin rpy="0 0.436332313 0" xyz="-0.00484538 0 0.05103205"/>
+  <parent link="camera_mount_link"/>
+  <child link="camera_link"/>
+ </joint>
+ <link name="camera_optical_frame"/>
+ <joint name="camera_optical_joint" type="fixed">
+  <!-- Nominal lens-front origin: calibrate for vision. +Z forward, +X right, +Y down. -->
+  <origin rpy="-1.57079632679 0 -1.57079632679" xyz="0.025 0 0"/>
+  <parent link="camera_link"/>
+  <child link="camera_optical_frame"/>
+ </joint>
 </robot>

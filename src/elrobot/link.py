@@ -420,7 +420,6 @@ class SimLink(Link):
         # Optional hook: (gripper_tick) -> tick the jaws stall at, or None. Lets a simulated
         # object block the gripper so grasp verification has something to detect.
         self.gripper_block: Callable[[float], float | None] | None = None
-        self.push: dict[int, int] = {}  # servo id -> extra load, as a hand leaning on that joint would add
         self.shove: dict[int, float] = {}  # servo id -> ticks a hand holds that joint away from where it is told to be
         import math
 
@@ -480,7 +479,7 @@ class SimLink(Link):
                 m.tick = int(round(self._pos[i])) % TICKS
                 m.speed = int(self._vel[i])
                 m.moving = abs(self._vel[i]) > 5
-                m.load = load + self.push.get(i, 0)
+                m.load = load
                 m.current = int(min(500, abs(self._vel[i]) * 0.02 + load * 0.3 + (3 if m.torque else 0)))
             self.state_stamp = now
             if self.frame_provider is not None and now - frame_t > 0.1:

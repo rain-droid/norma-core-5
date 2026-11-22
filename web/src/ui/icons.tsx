@@ -75,13 +75,6 @@ export const GhostIcon = (p: SVGProps<SVGSVGElement>) => (
   </Svg>
 );
 
-export const CollabIcon = (p: SVGProps<SVGSVGElement>) => (
-  <Svg {...p}>
-    <path d="M7 11.5V6a1.5 1.5 0 0 1 3 0v4.5V4.5a1.5 1.5 0 0 1 3 0v6V6a1.5 1.5 0 0 1 3 0v7.5" />
-    <path d="M16 10.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1.2a6 6 0 0 1-4.6-2.2L4.3 15a1.5 1.5 0 0 1 2.3-1.9l.4.5" />
-  </Svg>
-);
-
 export const StepsIcon = (p: SVGProps<SVGSVGElement>) => (
   <Svg {...p}>
     <path d="M10 6.5h10M10 12h10M10 17.5h10" />

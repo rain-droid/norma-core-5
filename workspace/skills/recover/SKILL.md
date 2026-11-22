@@ -23,13 +23,6 @@ Read the error first: each one is written to be acted on. Then, by what it says:
   "blocked" error that reaches you has failed twice: look before trying a third time. How
   much slower is `blocked_retry_speed` in `robot_config/motion.json`, between 0 and 1: 0.5 is
   half speed, 0 switches the second try off.
-- **contact: joint N (load ..., lag ...)**: collaboration mode is on and something touched the
-  arm during a move, or the arm touched something. It has already stopped, backed off a little
-  along the path it came by, and is holding. This move was not retried and must not be repeated
-  unchanged. Look with the top camera: a hand or an object in the way means wait, or ask, or
-  go round. If nothing is there and it happens again at the same place, it is the arm's own
-  load (a heavy object, a stretched pose): lift from closer in, or tell the person the
-  thresholds need raising (`collab_load_rise`, `collab_lag_rise` in the daemon's `config.yaml`).
 - **servo fault on joint(s) ... (status 32 = overload)**: that joint has dropped to a fifth of
   its torque and may be sagging. No command will be accepted and none should be tried, least
   of all with `check: false`. A person has to hold the arm while torque is switched off and on.

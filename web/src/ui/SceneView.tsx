@@ -33,6 +33,7 @@ export function SceneView({ insets, onScene }: Props) {
   const tableZ = useStore(app, (s) => s.meta?.table_z ?? 0);
   const plan = useStore(app, (s) => s.plan);
   const markers = useStore(app, (s) => s.markers);
+  const obstacles = useStore(app, (s) => s.obstacles);
   const stale = useStore(app, (s) => s.everOpened && s.link !== 'open');
   const linkOpen = useStore(app, (s) => s.link === 'open');
 
@@ -104,6 +105,7 @@ export function SceneView({ insets, onScene }: Props) {
   useEffect(() => scene?.setTableZ(tableZ), [scene, tableZ]);
   useEffect(() => scene?.setPlan(plan), [scene, plan]);
   useEffect(() => scene?.setMarkers(markers), [scene, markers]);
+  useEffect(() => scene?.setObstacles(obstacles), [scene, obstacles]);
   useEffect(() => scene?.setInsets(insets), [scene, insets]);
 
   const cx = insets.left + (window.innerWidth - insets.left - insets.right) / 2;

@@ -57,6 +57,32 @@ one rim point to the robot's left or right of it off `capture_camera`, `pixel_to
 point, and `pick_at` there with `yaw_deg: 0`, `grasp_height: 0.02`: one finger goes down the
 hole. `place_at` then puts the rim point, not the centre, at x, y.
 
+The black tape roll (about 8 cm across, band about 16 mm, 19 mm high) goes the same way: the
+tracker calls it `blue-N` and sees only a sliver of it, and `grasp_object` on it failed with
+"not in view of the top camera" after its own arm covered it. What worked: `capture_camera`,
+`pixel_to_table` (height 0.019) on the band 3 cm to the robot's left of the centre, `pick_at`
+there with `yaw_deg: 0`, `grasp_height: 0.02` (`width_mm` about 16), then `place_at`. It landed
+about 3 cm from the commanded spot.
+
+Measured on the real arm, 2026-11-22, at half speed (`speed_scale` 0.5 in robot_config/motion.json),
+with `find_objects` on SAM 3 (`prompt: "blue cube"`) giving the position and `pick_at` / `place_at`
+doing the work: three pick-and-place cycles of the 30 mm blue cube, every grasp clean
+(`width_mm` 27). Landings against the commanded spot: 4 mm off at 22 cm from the base, 8 and
+12 mm long (further from the base) at 34 to 35 cm, where the gripper leans 60 to 70 degrees to
+release. Too few to correct from, but if a far placement has to be exact, aim a centimetre short.
+
+A stack (a cube on a box) is one outline to `find_objects` unless the prompt names its parts:
+`find_objects` with `prompt: "blue cube, pink box"` (SAM 3 running) gives each its own entry,
+and the upper one has `on` (the id of what it stands on), `z_mm` (how high its underside is) and
+its own `height_mm`. Pick it with `pick_at` and `grasp_height` = (z_mm + height_mm / 2) / 1000.
+Heights are read off the side face the camera sees and are good to about 5 mm; they tend to
+come out a few millimetres low (the 30 mm cube reads 20 to 29). `z_mm` null means the lower
+object is too hidden to measure: move the upper one off by a height you judge yourself, or look
+from the wrist. Without the names, `pick_at` at the default height closed on the lower object
+(`width_mm` 36, not the cube's 27) and carried the pair: always check `width_mm` against the
+object you meant. Rings and rolls of tape get no `height_mm` (nothing of their side can be told
+from the hole).
+
 What the errors mean:
 
 - "gave up after 25 s: the work area is not quiet (...)": only under a tracker set to stop

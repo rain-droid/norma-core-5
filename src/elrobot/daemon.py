@@ -29,7 +29,8 @@ from .config import Config
 from .kinematics import Kinematics
 from .link import Link, SimLink, StationLink
 from .motion import interpolate_joint
-from .robot import Blocked, Contact, Robot, RobotError, Stopped
+from .robot import Blocked, Robot, RobotError, Stopped
+from .second_arm import SecondArm
 from .skills import GESTURES, Skills
 from .workspace import Workspace, write_json
 
@@ -52,6 +53,7 @@ class Hub:
         self._current_call: str | None = None
         self.voice = None
         self.workspace = Workspace(self, cfg.workspace_dir) if cfg.workspace_dir.is_dir() else None
+        self.second = SecondArm(cfg.second_arm_url, cfg.workspace_dir) if cfg.second_arm_url and not cfg.sim else None
         if isinstance(self.link, SimLink):
             from .simworld import SimWorld
 
@@ -71,6 +73,13 @@ class Hub:
         return StationLink(cfg.station_host, cfg.bus_serial, cfg.cameras)
 
     # ---- events
+
+    def snapshot(self) -> dict:
+        """The robot's state, and the second arm's beside it when there is one (None while its daemon is not answering)."""
+        snap = self.robot.snapshot()
+        if self.second is not None:
+            snap["second_arm"] = self.second.snapshot()
+        return snap
 
     def emit(self, kind: str, **fields) -> dict:
         ev = {"type": "event", "id": next(self._ids), "t": time.time(), "kind": kind, **fields}
@@ -220,8 +229,6 @@ class Hub:
                     await (robot.grasp() if gripper <= 0.0 else robot.set_gripper(gripper, label=label))
             except Stopped:
                 return done("stopped before it finished; the arm is holding position", "stopped")
-            except Contact as e:
-                return done(str(e), "contact")  # collaboration mode: touched, backed off; never retried unchanged
             except Blocked as e:
                 return done(str(e), "blocked")  # the one refusal a caller may answer by trying again, slower
             except RobotError as e:
@@ -288,7 +295,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             await asyncio.sleep(1 / 30)
             if hub.sockets:
                 try:
-                    hub._broadcast(hub.robot.snapshot())
+                    hub._broadcast(hub.snapshot())
                 except Exception:
                     log.exception("state broadcast failed")
 
@@ -305,6 +312,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         await hub.link.start()
         tasks = [asyncio.create_task(state_loop()), asyncio.create_task(health_loop())]
+        if hub.second is not None:
+            tasks.append(asyncio.create_task(hub.second.poll_loop()))
         if hub.workspace is not None:
             tasks.append(asyncio.create_task(hub.workspace.publish_loop()))
         if hub.voice is not None:
@@ -359,7 +368,14 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/state")
     async def state():
-        return hub.robot.snapshot()
+        return hub.snapshot()
+
+    @app.get("/api/second_arm/assets/{path:path}")
+    async def second_arm_asset(path: str):
+        found = await hub.second.asset(path) if hub.second is not None else None
+        if found is None:
+            return JSONResponse({"error": "no second arm, or it has no such file"}, status_code=404)
+        return Response(content=found[0], media_type=found[1], headers={"Cache-Control": "max-age=3600"})
 
     @app.get("/api/meta")
     async def meta():
@@ -424,8 +440,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         """Lets the workspace's tools show on the timeline and the 3D view. Display only."""
         body = await request.json()
         kind = body.pop("kind", None) if isinstance(body, dict) else None
-        if kind not in ("tool_start", "tool_end", "markers", "detections", "log", "steps"):
-            raise HTTPException(400, "kind must be one of tool_start, tool_end, markers, detections, log, steps")
+        if kind not in ("tool_start", "tool_end", "markers", "detections", "log", "steps", "obstacles", "plan"):
+            raise HTTPException(400, "kind must be one of tool_start, tool_end, markers, detections, log, steps, obstacles, plan")
         hub.emit(kind, **{k: v for k, v in body.items() if k not in ("type", "id", "t")})
         return {"ok": True}
 
@@ -463,14 +479,6 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 return {"ok": False, "error": str(e), "kind": "robot"}
             finally:
                 hub.robot.source = None
-
-    @app.post("/api/collab")
-    async def collab(request: Request):
-        """Collaboration mode on or off (docs/API.md): softer, slower, backs off when touched."""
-        body = await request.json()
-        on = await hub.robot.set_collab(bool(body.get("enable")))
-        hub.emit("log", level="info", text="collaboration mode on: softer, slower, backs off when touched" if on else "collaboration mode off")
-        return {"ok": True, "collab": on}
 
     @app.post("/api/torque")
     async def torque(request: Request):

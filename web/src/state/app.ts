@@ -24,7 +24,6 @@ export interface StatusSlice {
   connected: boolean;
   calibrated: boolean;
   torque: boolean;
-  collab: boolean;
   busy: boolean;
   activity: string;
   source: Source | null;
@@ -107,10 +106,18 @@ export interface Steps {
 export type Meta = Omit<Hello, 'events' | 'type'>;
 
 /** Everything that is derived from the event stream. */
+/** The things on the table from the last scan, for the 3D view. */
+export interface ObstacleSet {
+  cell: number;
+  tableZ: number;
+  boxes: [number, number, number][];
+}
+
 interface Derived {
   timeline: TimelineItem[];
   plan: Plan | null;
   markers: WorldMarker[];
+  obstacles: ObstacleSet | null;
   detections: Record<string, DetectionSet>;
   voiceState: VoiceState;
   steps: Steps | null;
@@ -135,6 +142,7 @@ const EMPTY: Derived = {
   timeline: [],
   plan: null,
   markers: [],
+  obstacles: null,
   detections: {},
   voiceState: 'idle',
   steps: null,
@@ -245,7 +253,6 @@ function onState(s: RobotState): void {
     connected: s.connected,
     calibrated: s.calibrated,
     torque: s.torque,
-    collab: Boolean(s.collab),
     busy: s.busy,
     activity: s.activity,
     source: s.source ?? null,
@@ -277,6 +284,7 @@ function pickDerived(s: AppState): Derived {
     timeline: s.timeline,
     plan: s.plan,
     markers: s.markers,
+    obstacles: s.obstacles,
     detections: s.detections,
     voiceState: s.voiceState,
     steps: s.steps,
@@ -347,6 +355,9 @@ function reduce(d: Derived, ev: RobotEvent): Derived {
 
     case 'markers':
       return { ...d, markers: ev.markers ?? [] };
+
+    case 'obstacles':
+      return { ...d, obstacles: ev.boxes?.length ? { cell: ev.cell, tableZ: ev.table_z, boxes: ev.boxes } : null };
 
     case 'detections': {
       const detections = { ...d.detections };

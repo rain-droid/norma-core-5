@@ -137,7 +137,8 @@ the web UI only). Also `POST /api/torque`,
 |---|---|---|
 | `top` | UGREEN webcam about 79 cm above the mat; the camera to measure with | `workspace/robot_config/camera_top.json` |
 | `wrist` | KD camera on the gripper | `workspace/robot_config/camera_wrist.json` (copy of `data/camera_wrist.json`) |
-| `across` | KD camera across the table, the former `top`; no tool uses it | `camera_top.kd-backup.json` (its old fit) |
+| `across` | colour camera of the Orbbec DaBai DCW2 across the table | none of its own |
+| (depth) | the same Orbbec's depth sensor, read by `tools/util/depth.py`, not through the Station | `workspace/robot_config/camera_depth.json` (`T_base_depth`) |
 
 Names are assigned in `config.yaml` by camera id; the two KD cameras share a model, so their ids include
 bus:device and change when replugged (`scripts/probe.py` prints them). Frames are 853x480 at about 15 fps.
@@ -162,7 +163,13 @@ bus:device and change when replugged (`scripts/probe.py` prints them). Frames ar
 | `perception/latest.json`, `perception/exteroception/{top,wrist}/rgb.jpg`, `perception/proprioception/state.json` | daemon, twice a second | newest state and frames |
 | `perception/exteroception/objects.json` | `find_objects` | last object listing |
 | `perception/exteroception/tracks.json`, `tracks.jpg`, `intrusion.*` | the tracker process | live tracks and the last alarm |
-| `robot_config/motion.json` | people | `safe_mode` (straight down and straight lines only), `carry_height`, `blocked_retry_speed` |
+| `robot_config/motion.json` | people | `blocked_retry_speed` |
+| `robot_config/camera_depth.json` | `calibrate_depth` | the depth sensor in the base frame |
+| `robot_config/second_arm.json` | `calibrate_second_arm` | `T_base_second`: the second arm's base in this arm's base frame |
+| `robot_config/second_arm.urdf` | people | the SO-101's model, for the shared space |
+| `robot_config/hand_over_taught.json` | `teach_hand_over` | one hand-over pose pair, adjusted by hand |
+| `state/two_arm/NAME.json` | `record_poses` | poses shown with both arms limp: steps and the whole track |
+| `state/obstacles.npz` | `scan_obstacles` | the height map kept as obstacles, with its time |
 | `state/world.json` | `describe_objects`, `name_objects`, `grasp_object`, `put_object` | the world model: objects by key and name, place, shape, state, history |
 | `state/chess.json` | chess tools | board corners, heights, moves, appearance model |
 | `state/drawing.json` | drawing tools | strokes, sheet corners, pen offset, progress |
@@ -190,7 +197,8 @@ Signatures as of 2026-11-22; `--schema` on a tool is always current.
 | `draw_pen` | `corners: list \| None = None, grip: bool = False, release: bool = False, seat_height: float = 0.05` | Say where the sheet of paper is, and take hold of the pen so its tip is known. |
 | `draw_plan` | `image_path: str \| None = None, image_id: str \| None = None, quad_px: list \| None = None, strokes: list \| None = None, invert: bool = False, detail: float = 0.004` | Decide what to draw: turn a picture into pen strokes, or take strokes you wrote yourself. |
 | `draw_run` | `margin: float = 0.015, pen_up: float = 0.015, press: float = 0.001, speed: float = 0.3, first_stroke: int = 0, dry_run: bool = False` | Draw the planned strokes on the sheet with the pen in the gripper. |
-| `find_objects` | `camera: str = 'top', max_objects: int = 8` | Outline, number and locate whatever stands out on the table, seen by a camera. |
+| `push_t` | `x: float, y: float, yaw_deg: float = 0.0, max_pushes: int = 15, tolerance_mm: float = 6.0, tolerance_deg: float = 6.0, shape_mm: list \| None = None, height_mm: float = 20.0, max_step_mm: float = 12.0, turn: bool = True` | Push a flat T-shaped block across the table until it lies on a target pose: Push-T. |
+| `find_objects` | `camera: str = 'top', max_objects: int = 8, prompt: str \| None = None` | Outline, number and locate the objects on the table, seen by a camera. |
 | `grasp_object` | `object: str, attempts: int = 2, grasp_height: float \| None = None` | Pick up an object by name: "the ring", "blue cube", or its key. |
 | `home` | `speed: float = 0.5` | Go to the ready pose: gripper over the table in front of the base, pointing down and forward. |
 | `joint_command` | `joints=None, gripper: float \| None = None, speed: float = 0.8, check: bool = True, allow_low: bool = False` | The atomic action, and the only thing the robot understands: joint angles. |

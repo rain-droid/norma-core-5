@@ -1,4 +1,4 @@
-"""Collaboration mode on the simulated arm: slower, softer, and it backs off when touched."""
+"""Leading the simulated arm by hand: it follows a push, stays where it is left, and what it was shown is replayed."""
 
 import asyncio
 import os
@@ -16,27 +16,12 @@ from elrobot.config import REPO_ROOT, Config
 from elrobot.daemon import create_app
 from elrobot.kinematics import Kinematics
 from elrobot.link import SimLink
-from elrobot.robot import Contact, Reflex, Robot
-from elrobot.servo import ARM_IDS, REG_TORQUE_LIMIT
+from elrobot.robot import Robot
+from elrobot.servo import ARM_IDS
 
 
-def test_a_step_in_load_is_a_touch_and_a_slow_drift_is_not():
-    reflex = Reflex(load_rise=150.0, lag_rise=0.09)
-    load, lag = np.zeros(7), np.zeros(7)
-    hit = None
-    for i in range(60):  # 1.2 s of a move whose load drifts by 200 units a second, as gravity does
-        load[1] += 4.0
-        hit = hit or reflex.update(load.copy(), lag, ending=False)
-        time.sleep(0.02)
-    assert hit is None
-    for i in range(12):  # then a hand: 400 units at once
-        hit = hit or reflex.update(load + np.array([0, 400, 0, 0, 0, 0, 0.0]), lag, ending=False)
-        time.sleep(0.02)
-    assert hit and hit.startswith("joint 2")
-
-
-async def _robot(collab: bool) -> Robot:
-    cfg = Config(collab=collab)
+async def _robot() -> Robot:
+    cfg = Config()
     kin = Kinematics(cfg.urdf)
     limits = {j.id: (j.lower, j.upper) for j in kin.joints}
     limits[8] = (kin.gripper_lower, kin.gripper_upper)
@@ -48,55 +33,9 @@ async def _robot(collab: bool) -> Robot:
     return robot
 
 
-def test_touched_in_mid_move_it_stops_backs_off_and_says_contact():
-    async def scenario():
-        robot = await _robot(collab=True)
-        assert robot.pace == pytest.approx(robot.cfg.collab_speed)  # slower throughout
-        start = robot.q()
-        target = start.copy()
-        target[0] += 0.9
-
-        async def push():  # well into the move a hand leans on the base joint
-            await asyncio.sleep(1.3)
-            robot.link.push[ARM_IDS[0]] = 450
-
-        pusher = asyncio.create_task(push())
-        with pytest.raises(Contact) as stopped:
-            await robot.move_joints(target)
-        pusher.cancel()
-        robot.link.push.clear()
-        assert "backed off" in str(stopped.value) and str(stopped.value).startswith("contact: joint 1")
-        travelled = abs(robot.q()[0] - start[0])
-        assert 0.02 < travelled < 0.8, travelled  # it had set off, and it did not arrive
-        await robot.link.stop()
-
-    asyncio.run(scenario())
-
-
-def test_switching_it_on_lowers_the_torque_limit_and_off_restores_it():
-    async def scenario():
-        robot = await _robot(collab=False)
-        written = []
-        sync_write = robot.link.sync_write
-
-        async def spy(register, values):
-            if register == REG_TORQUE_LIMIT:
-                written.append(int.from_bytes(values[ARM_IDS[0]], "little"))
-            return await sync_write(register, values)
-
-        robot.link.sync_write = spy
-        assert await robot.set_collab(True) is True and robot.snapshot()["collab"] is True
-        assert await robot.set_collab(False) is False
-        assert written == [robot.cfg.collab_torque_limit, robot.cfg.arm_torque_limit]
-        assert robot.pace == 1.0
-        await robot.link.stop()
-
-    asyncio.run(scenario())
-
-
 def test_led_by_hand_it_follows_the_push_stays_there_and_reports_the_path():
     async def scenario():
-        robot = await _robot(collab=False)
+        robot = await _robot()
         start = robot.q()
 
         async def hand():  # a hand holds the base joint 0.12 rad off its command for a second and a half, then lets go
@@ -122,7 +61,7 @@ def test_led_by_hand_it_follows_the_push_stays_there_and_reports_the_path():
 
 def test_left_untouched_the_guiding_ends_on_time_without_having_moved():
     async def scenario():
-        robot = await _robot(collab=False)
+        robot = await _robot()
         start = robot.q()
         led = await robot.guide(seconds=1.5)
         assert led == {"path": led["path"], "moved": False, "ended": "time", "seconds": led["seconds"]} and len(led["path"]) == 1
@@ -175,20 +114,6 @@ def run(tool: str, **arguments) -> dict:
 
     sys.modules.pop(tool, None)
     return call(getattr(__import__(tool), tool), arguments)
-
-
-def test_the_agent_can_switch_collaboration_on_and_a_touch_ends_the_move_as_contact(workspace):
-    root, link = workspace
-    assert "error" not in run("home")
-    assert run("collaboration", enable=True)["collaboration"] is True
-    q = joints_now().tolist()
-    q[0] += 0.9
-    threading.Timer(1.3, lambda: link.push.__setitem__(ARM_IDS[0], 450)).start()
-    touched = run("joint_command", joints=q)
-    link.push.clear()
-    assert touched["error"].startswith("contact: joint 1"), touched
-    assert "retried_blocked" not in touched  # a touch is not answered by pushing again
-    assert run("collaboration", enable=False)["collaboration"] is False
 
 
 def test_a_place_shown_by_hand_is_saved_and_replayed(workspace):

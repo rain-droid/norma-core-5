@@ -5,6 +5,125 @@ today is in `docs/FEATURES.md`. Add an entry with each push.
 
 ## 2026-11-22
 
+### Stacking by the second arm tried; documentation for the two-arm work
+Modified by: Atharva Bhorpe
+
+- `workspace/tools/second_arm_stack.py`: the SO-101 picks a thing off the mat and sets it on another, its
+  jaws brought over each place by the top camera. On the real table it picked the cube 2 times in 4 and set it
+  beside the base both times: its joints put it 2.5 to 4.5 cm from where it is at the table, and the top
+  camera sees too little of the gripper under its own camera to correct that reliably.
+- The SO-101's `reach` goes over what stands on the way, like the ElRobot's carry.
+- `docs/SECOND_ARM.md` (new): start, calibration, tools, the shared space, what is proven, known limits.
+  README, FEATURES, INTERFACE, PLAN and HANDOFF brought up to the state of the afternoon.
+- `workspace/.gitignore`: the poses shown by hand (`state/two_arm/`) are kept in the repository; the Orbbec
+  SDK's log folder is not.
+
+### Things on the table as obstacles, carrying over them, wrist cameras in the models, all of it in the twin
+Modified by: Atharva Bhorpe
+
+- `workspace/tools/scan_obstacles.py`: the depth camera's height map (4 mm cells) is kept in
+  `state/obstacles.npz` with both arms cut out. For two minutes the shared space
+  (`tools/util/shared_space.py`) also walks every checked move against it: no part of an arm may dip into
+  something on the table, except around where the move starts and ends. Seen on the real table: a carry of the
+  sponge through the fallen pink block (47 mm) was refused.
+- `util/motion.py` `carry`, used by `pick_at` and `place_at`: with a recent map, the move goes up to where the
+  gripper clears the tallest thing along the straight line, across at that height (leaning, since this arm
+  cannot point straight down up there), then to the pose. The same carry then went through, over the block.
+- Both arms carry the wrist camera on the same mount on the same parallel gripper. It is now in the ElRobot's
+  URDF (`assets/elrobot/elrobot_follower.urdf`, `workspace/robot_config/model.urdf`; the links and the mesh
+  come from the SO-101's URDF, whose gripper base frame is the same), in both copies of the kinematics as a
+  body part (self-collision, table clearance) and in the shared space for both arms. The model puts the
+  ElRobot's lens within 2 cm of where its camera calibration has the camera.
+- Web UI: the ElRobot's twin shows its camera; the scan's things are drawn as columns coloured by height
+  (new `obstacles` event) with their heights as labels; the SO-101's planned way, and any way the shared space
+  refused, is drawn like the ElRobot's own planned path (`plan` events from the workspace, both through
+  `POST /api/event`).
+- The SO-101's daemon and the main stack must be started from a terminal of one's own
+  (`scripts/second_arm_up.sh`, `pixi run up`): started from an agent session they are ended after two hours.
+
+### One space for both arms, with collision checks; hand-over from poses shown by hand
+Modified by: Atharva Bhorpe
+
+- `workspace/tools/util/shared_space.py`: both arms in the ElRobot's base frame, each as five capsules; the
+  SO-101 read from `robot_config/second_arm.urdf` (its forward kinematics agree with its daemon to 1.8 mm over
+  a recorded track) with its own inverse kinematics there. `between` gives the smallest gap, `path_clear` walks
+  a joint path of one arm against the other standing still.
+- Every joint command of the ElRobot (`util/arm.py`, real arm only) and the SO-101's `home`, `move_to` and
+  `move_joints` through `tools/second_arm.py` are refused if any part would come within 2 cm of the other arm;
+  a hand-over may let the grippers (and a gripper and the other's wrist) meet. `tools/arms_clearance.py` reads
+  the gap. Tried on the real arms: a move of the ElRobot at the SO-101's gripper was refused, and a full
+  pick and hand-over cycle went through. Not checked: the SO-101 daemon's own tools (pick, place, gestures),
+  things on the table, a held thing.
+- `tools/record_poses.py`, `tools/replay_poses.py`: a person moves both limp arms through poses; they are kept
+  in `state/two_arm/` and played back. `hand_over` uses such a recording when there is one ("poses"): the
+  arms go to where they were when the SO-101's jaws closed, the ElRobot is corrected onto the shown pose, and
+  if the jaws close on nothing the ElRobot offers the thing 1 cm further, up to 3 cm.
+- `tools/teach_hand_over.py`: one hand-over adjusted by pushing the ElRobot ("pose").
+- Hand-over of the 3 cm cube, unattended runs that reached the cube: 0 of 3 before the SO-101's height was
+  corrected from its own joints, 2 of 2 computed after, 1 of 2 from one adjusted pose, 4 of 6 from shown poses.
+
+### Both arms in one digital twin
+Modified by: Atharva Bhorpe
+
+- `src/elrobot/second_arm.py`: the daemon reads the SO-101 daemon's state ten times a second and adds it to its
+  own state message and `GET /api/state` as `second_arm` (joints, gripper, and `T`, its base in the ElRobot's
+  frame from `workspace/robot_config/second_arm.json`); `null` while that daemon is not answering, absent when
+  `second_arm_url` in the config is empty. `GET /api/second_arm/assets/...` passes its URDF and meshes through.
+- Web UI: the 3D view loads the second arm the first time the state carries one that has been placed, and poses
+  it from its joint angles (dark parts, orange jaws). Seen on the real setup with both arms at home.
+- The twin stands the SO-101 upright on the table at the fitted position and turn; the fit itself is tilted
+  8.5 degrees, which is the fit's error, not the arm's.
+- `tests/test_second_arm.py`.
+
+### Second arm: an SO-101 next to the ElRobot, and a hand-over between them
+Modified by: Atharva Bhorpe
+
+- The SO-101 with the parallel gripper runs on its own daemon, the `autopilot` branch (its SO-101 profile),
+  checked out beside this repository and started by `scripts/second_arm_up.sh` on port 8770 against the same
+  Station. Nothing of that branch is merged here. `config.yaml` now names the ElRobot's servo bus
+  (`bus_serial`), since the Station has two.
+- Workspace: `tools/util/second_arm.py` (client and rigid fit), `tools/second_arm.py` (runs the SO-101's tools,
+  positions optionally in the ElRobot's frame), `tools/calibrate_second_arm.py` (the SO-101 carries a coloured
+  block through places the depth camera measures; writes `robot_config/second_arm.json`), `tools/hand_over.py`.
+- `tools/util/depth.py`: `find_in_air` finds a thing of one colour held above the mat, in base coordinates.
+- On the real arms: calibration fitted six places to 4 to 8 mm. The hand-over of the 3 cm blue cube from the
+  ElRobot's fingertips to the SO-101 succeeded twice, each time after one height correction made by hand
+  (the SO-101 sags 8 to 17 mm reaching out level); that correction is now in the tool, read from the SO-101's
+  own joints, and has not yet had a run from start to finish. The pink foam block could not be handed over:
+  the ElRobot's wedge fingers cover it.
+
+### Depth camera across the table (Orbbec DaBai DCW2)
+Modified by: Atharva Bhorpe
+
+- The KD camera across the table was replaced by an Orbbec DaBai DCW2. Its colour camera (USB `2bc5:0561`) is
+  camera `across` through the Station (`config.yaml`; `scripts/cameras_ready.sh` hands it back to the kernel
+  like the others). Only one KD camera is left, so `wrist` is matched by vendor:product alone.
+- Its depth sensor (USB `2bc5:06a0`) is read by `workspace/tools/util/depth.py` with Orbbec's v1 SDK, built
+  into `bin/orbbec/` by `scripts/orbbec_setup.sh` (why a build: `docs/DECISIONS.md`). A udev rule for vendor
+  `2bc5` lets the user open both devices.
+- New tools: `calibrate_depth` (places the sensor in the base frame from the mat's plane and two corner tags;
+  writes `robot_config/camera_depth.json`) and `depth_scan` (heights of everything on the mat, heights at given
+  spots, a height map). On the real table: tags fitted to 1.0 mm, mat flat to 1.6 mm, a 30 mm cube read 29 mm.
+- `workspace/tests/test_depth.py`: the fit and the height map on a computed scene.
+- Two machine settings the depth camera needs, both in `scripts/orbbec_setup.sh`: the udev rule, and the
+  kernel's USB transfer memory raised from 16 to 256 MB (at 16 the depth stream stops after three pictures
+  once the Station has all three cameras at 1280x720).
+- `scripts/cameras_ready.sh` now also streams a few 1280x720 pictures from the KD and Orbbec colour cameras
+  through the kernel driver. Without that the replugged wrist camera came up at 640x480 (Station error -51),
+  which its calibration does not fit.
+
+### Safe mode and collaboration mode removed
+Modified by: Atharva Bhorpe
+
+- Both restricted the arm too much (reasons in `docs/DECISIONS.md`). Removed, not switched off:
+  `workspace/tools/util/safe.py` and its hooks in `util/arm.py`, `util/planning.py` and `home`; the `safe_mode`
+  and `carry_height` keys of `robot_config/motion.json`; the daemon's touch reflex, `POST /api/collab`, the
+  `collab_*` settings, the `contact` error kind and `ELROBOT_TRACE`; the web UI's "Collaboration" switch;
+  the `collaboration` tool; their sections in `workspace/AGENTS.md` and the recover skill; their tests.
+- The arm leans again and reaches about 36 cm; `home` goes to the usual ready pose; motions run at full speed.
+- Hand-guiding (`hand_guide`, `replay_demo`, `POST /api/guide`) stays. Its tests are now `tests/test_hand_guide.py`.
+- The two entries below describe what was removed; `git show 7027d7e` has the code.
+
 ### Hand-guiding: lead the arm by hand, replay what was shown
 Modified by: Atharva Bhorpe
 

@@ -44,6 +44,10 @@ nothing. If the robot daemon is not running the error says how to start it.
 | See | `capture_camera`, `find_objects`, `read_proprioception`, `look_at_table` | only `look_at_table` |
 | Follow objects live | `track_objects` | no, but its motion heuristic slows the arm down |
 | Pixel to position | `pixel_to_table` | no |
+| Heights, from the depth camera | `depth_scan`, `calibrate_depth` | no |
+| Things on the table as obstacles | `scan_obstacles` | no |
+| The second arm (SO-101) | `second_arm`, `hand_over`, `arms_clearance`, `calibrate_second_arm` | the second arm; `hand_over` and the calibration move this one too |
+| Poses shown with both arms limp | `record_poses`, `replay_poses`, `teach_hand_over` | `record_poses`: the person moves them; the others yes |
 | The contract itself | `joint_command`, or `robot_config/control.py` from Python | yes |
 | Move the tool point | `move_tcp`, `adjust_tcp` | yes |
 | Gripper | `open_gripper`, `close_gripper` | jaws only |
@@ -54,8 +58,8 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Choosing a grasp among neighbours | `plan_grasp` | only with `pick: true` |
 | Chess on a physical board | `chess_setup`, `chess_see`, `chess_move`, `chess_record` | `chess_move`; `chess_setup` and `chess_see` turn the arm aside |
 | Drawing with a pen | `draw_plan`, `draw_pen`, `draw_run` | `draw_pen`, `draw_run` |
+| Pushing a flat T onto a target pose (Push-T) | `push_t` | yes; `max_pushes: 0` only looks |
 | Poses and safety | `home`, `rest`, `stop` | `stop` always works |
-| Working next to a person | `collaboration` | no: it changes how the arm moves and yields |
 | Shown by hand, then repeated | `hand_guide`, `replay_demo` | `hand_guide`: the person moves it; `replay_demo` yes |
 | Skills | `activate_skill`, `deactivate_skill`, `create_skill` | no |
 | Telling the people watching what comes next | `show_steps` | no |
@@ -77,6 +81,8 @@ to the numbers you give them and check nothing; use them for what the tracker ca
 ## Objects have names
 
 `find_objects` and the tracker know colours, not things: a rubber ring and a cube are both `red`.
+(`find_objects` outlines things with SAM 3 when its service runs, `uv run tools/util/sam3_server.py`, and
+then takes a `prompt` such as "blue cube"; the tracker stays with colours.)
 So before a task that names things, look and name them: `describe_objects` returns a picture
 sheet with one cut-out per object; open it and write down what each is with `name_objects`
 ("blue cube", "rubber ring"). The names live in the world model (`state/world.json`) and stay
@@ -85,15 +91,44 @@ with an object when it is moved. After that, work by name: `grasp_object` "the r
 `grasp_object` looks again before it reaches, grips a ring by its rim, and has the wrist camera
 check the grasp. When the person talks about a thing, use their word for it as its name.
 
-## Collaboration mode
+## Heights come from the depth camera
 
-When a person will have their hands near the arm ("work with me", "hand it to me", "I'll hold
-the paper"), switch it on first: `tools/collaboration.py '{"enable": true}'`. The arm then pushes
-less hard, moves slower, and when something touches it during a move it stops, backs off the way
-it came and the command ends with `contact: joint N ...`. That is a person or an obstacle, not
-a fault: look, say what happened, and wait or choose another way. Never repeat the move
-unchanged and never switch the mode off to get past a contact. It is gentler, not safe: say so
-if someone asks whether they can put their face near it.
+Across the table from the arm stands a depth camera. Its colour picture is camera `across`
+(`capture_camera`): the scene from the front, good for seeing what is on top of what. Its depth
+sensor is read by `tools/depth_scan.py`: every thing standing on the mat with the height of its
+top, to about 3 mm, and a picture of the table from above coloured by height. Use it when height
+is the question: how tall a stack is, whether one thing lies on another, whether a spot is free,
+whether something was really put down or lifted (scan before and after). Pass the x, y that
+`find_objects` gave for an object in `at` to get that object's height. For aiming a grasp keep
+using the top camera's positions. The arm hides what is under and behind it: send it home before
+a scan. If the camera's stand or the mat was moved, run `tools/calibrate_depth.py` once.
+
+## There is a second arm
+
+To this arm's right stands an SO-101 with an orange parallel gripper, on its own daemon
+(`scripts/second_arm_up.sh`). `tools/second_arm.py` runs its tools: status, home, rest, move_to,
+gripper, grasp, move_relative. It has five joints and reaches about 30 cm; with `frame="base"` you
+positions are in this arm's frame. Both arms live in one model (`tools/util/shared_space.py`): a
+move of either that would bring any part within 2 cm of the other arm is refused, naming the
+parts; `arms_clearance` reads the gap. Then move the other arm away first (home, rest) or choose
+another place. Only one arm moves at a time.
+
+`scan_obstacles` adds what stands on the table to that model for two minutes: a move that would
+dip a part of an arm into something is refused, naming the thing's height and place, and
+`pick_at` and `place_at` carry over the tallest thing on their way instead of through it. Scan
+before carrying something across the table, and again after things have been moved. The model
+does not know what a gripper holds, and the second arm's own pick, place and gestures are not
+checked. The web UI's 3D view shows both arms, the things scanned and the path about to be taken.
+
+`tools/hand_over.py` passes what this arm holds to the second arm in the air. Pick the thing by
+its top only (`pick_at` with `grasp_height` 0.03 for the 3 cm cube) so its lower part hangs free,
+then call `hand_over(colour="blue")`. This arm holds it out where both reach, the depth camera
+measures where it really is, the second arm comes up from below, closes, and this arm lets go and
+goes home. Check `second_arm_holding` and `second_arm_has_it` in the result; on an error this arm
+still holds the thing and you can call it again. Afterwards the second arm holds the thing: lower
+it and open (`move_relative`, `gripper`) or carry it somewhere with `move_to`. If either arm or
+the depth camera was moved, run `calibrate_second_arm` (a person hands the second arm the pink
+block first).
 
 ## Shown by hand
 
@@ -105,22 +140,6 @@ so a pick and place is taught in three or four calls and `tools/replay_demo.py` 
 without help. A demonstration repeats joint angles, not the intention: before replaying, check
 that the objects are where they were, and afterwards check with a camera that it did what was
 meant. When a taught motion is worth keeping, write a skill around it (`create_skill`).
-
-## Safe mode
-
-`robot_config/motion.json` has `"safe_mode": true`. While it is on (tools/util/safe.py):
-
-- the gripper only ever points straight down, with the jaws turned to suit the object;
-- every move is straight lines: up to a low carry height, across, down. No arcs;
-- anything that cannot be done that way is refused before the arm moves.
-
-Pointing straight down, this arm reaches about 16 cm either side of the base and 12 to 24 cm in
-front of it, and no higher than about 7 cm. So an object further out is **too far**: the tool
-says so, `describe_objects` marks it `reachable: false`, and the right answer is to tell the
-person and ask them to move it closer. Do not look for a way round it: no leaning poses, no
-`check: false`, no joint commands of your own, and do not switch safe mode off yourself. A person
-who is supervising may switch it off; then the arm leans and reaches about 36 cm again. Carried
-objects travel only about 4 cm above the table, so do not carry one over something taller.
 
 ## Leave a skill behind
 

@@ -72,6 +72,7 @@ function partMaterial(file: string, servoMaterials: Map<number, MeshStandardMate
     }
     return m;
   }
+  if (file.includes('CameraMount')) return shared.gear; // the wrist camera's mount: dark, like the camera on it
   if (file.includes('Gripper_Jaw')) return shared.finger;
   if (file.includes('Gripper_Gear')) return shared.gear;
   return shared.print;

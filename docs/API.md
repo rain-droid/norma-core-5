@@ -130,12 +130,11 @@ and a `kind`. Kinds:
   themselves. A motion under way changes speed smoothly along its path; to keep the arm slow,
   keep posting. `state.pace` is the fraction in force. The workspace's tracker posts this while
   something moves on the table. `{"ok": true, "pace": 0.25}`.
-- `POST /api/collab` with `{"enable": true}` → collaboration mode on or off: `{"ok": true, "collab": true}`.
-  On, the arm servos get `collab_torque_limit` instead of `arm_torque_limit`, motions run at no more than
-  `collab_speed` of their planned speed, and a touch during an ordinary move (a joint's load or lag stepping
-  away from its level over the last quarter second) makes the arm stop, retreat `collab_backoff_s` along its
-  path and hold; the command under way ends with `kind: "contact"`. `state.collab` says whether it is on;
-  `collab: true` in `config.yaml` starts the daemon with it on.
+- `GET /api/second_arm/assets/{path}` → a file of the second arm's model (URDF, meshes), fetched from its
+  daemon. The state message and `GET /api/state` carry `second_arm` when `second_arm_url` is set:
+  `{"robot", "urdf", "T", "connected", "torque", "activity", "joints", "gripper", "ee"}`, where `T` is its base
+  in this arm's base frame (4x4, null until `tools/calibrate_second_arm.py` has run); the whole value is null
+  while its daemon is not answering. This daemon never commands the second arm.
 - `POST /api/guide` with `{"seconds": 30}` → the arm is led by hand: a joint pushed more than `guide_deadband`
   off its resting error has its command follow the push, and it stays where it is left. Blocks until the arm
   has been moved and then left alone for `guide_idle_s`, until `seconds` (1 to 120) have passed, or until
@@ -167,9 +166,8 @@ The workspace's tools run in the agent's own shell. This is all they can ask of 
   waypoints of seven joint angles in radians, travelled as one move; `gripper` is applied after
   the arm arrives, and 0 closes until the jaws stall. Either may be left out. Blocks until done.
   Returns `{"ok": true, "joints": [7 measured], "gripper": {...}, "tcp": {...}}` or
-  `{"ok": false, "error": "...", "kind": "invalid" | "busy" | "robot" | "blocked" | "contact" | "stopped"}`.
+  `{"ok": false, "error": "...", "kind": "invalid" | "busy" | "robot" | "blocked" | "stopped"}`.
   `blocked` is a joint trailing its setpoint: the one refusal the workspace answers by sending the move once more, slower.
-  `contact` is collaboration mode noticing a touch: the arm has backed off, and the workspace does not send the move again.
   Refused outside the calibrated joint limits, outside the clearance envelope unless
   `check` is false (`allow_low` lets the fingertips reach the table surface), and while any
   servo reports a fault. Shares the one-motion-at-a-time lock with `/api/tools`.

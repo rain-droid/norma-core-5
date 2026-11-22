@@ -207,6 +207,22 @@ class Kinematics:
         self._tips_tool = np.array([[half, 0, TCP_BACKOFF], [-half, 0, TCP_BACKOFF]])
         # Extra body points (tool frame) included in clearance checks, e.g. the wrist camera.
         self.extra_points_tool = np.zeros((0, 3))
+        # The wrist camera on its mount, when the URDF has it (camera_mount_joint, camera_joint): the foot
+        # of the mount and the front of the lens, in the gripper base frame. It stands 7 cm off the
+        # gripper's axis, further than anything else on the hand.
+        self.camera_tip = None
+        named = {j.get("name"): j for j in root.findall("joint")}
+        if "camera_mount_joint" in named and "camera_joint" in named:
+
+            def fixed(name: str) -> np.ndarray:
+                o = named[name].find("origin")
+                return _transform([float(v) for v in o.get("xyz", "0 0 0").split()], [float(v) for v in o.get("rpy", "0 0 0").split()])
+
+            mount = fixed("camera_mount_joint")
+            camera = mount @ fixed("camera_joint")
+            lens = camera[:3, :3] @ np.array([0.025, 0.0, 0.0]) + camera[:3, 3]
+            self.camera_tip = np.array([mount[:3, 3], lens])
+            self.extra_points_tool = ((lens - self.T_tip_tool[:3, 3]) @ R_tool)[None]
 
         # The same arm as a Pinocchio model, for pink's inverse kinematics: the seven arm joints
         # (gripper joints locked) and a frame at the tool point. If it ever disagreed with fk()
@@ -276,17 +292,27 @@ class Kinematics:
             (j[3], j[5], 0.028),  # forearm
             (j[5], g.wrist, 0.028),  # wrist
             (g.wrist, tip_mid, 0.036),  # gripper
+            *self._camera_segment(q),  # wrist camera, when the URDF has one
         ]
+
+    def _camera_segment(self, q) -> list[tuple[np.ndarray, np.ndarray, float]]:
+        if self.camera_tip is None:
+            return []
+        T = self.fk_tip(q)
+        foot, lens = (T[:3, :3] @ self.camera_tip.T).T + T[:3, 3]
+        return [(foot, lens, 0.022)]
 
     # Body-part pairs that can actually meet. Neighbours, and parts separated by one short
     # link, always sit within their radii of each other and are excluded.
-    _COLLISION_PAIRS = ((0, 3), (0, 4), (0, 5), (1, 4), (1, 5), (2, 5))
-    _PART_NAMES = ("base", "upper arm", "elbow", "forearm", "wrist", "gripper")
+    _COLLISION_PAIRS = ((0, 3), (0, 4), (0, 5), (1, 4), (1, 5), (2, 5), (0, 6), (1, 6), (2, 6))
+    _PART_NAMES = ("base", "upper arm", "elbow", "forearm", "wrist", "gripper", "wrist camera")
 
     def self_collision(self, q, margin: float = 0.0) -> str | None:
         """Name the first pair of body parts that overlap, or None."""
         segs = self.body_segments(q)
         for a, b in self._COLLISION_PAIRS:
+            if b >= len(segs):
+                continue  # no wrist camera in this URDF
             pa, qa, ra = segs[a]
             pb, qb, rb = segs[b]
             if segment_distance(pa, qa, pb, qb) < ra + rb + margin:

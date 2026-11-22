@@ -12,7 +12,7 @@ gripped off-centre, or released from leaning jaws, lands a centimetre or two off
 
 import numpy as np
 
-from util.motion import require_ready, tcp_report
+from util.motion import require_ready, tcp_report, carry
 
 RELEASE_ABOVE = 0.022  # metres between the surface and the tool point when the jaws open
 
@@ -24,7 +24,7 @@ def place_at(ctx, x: float, y: float, z: float = 0.0, yaw_deg: float | None = No
     ctx.emit("markers", markers=[{"id": "target", "label": "place", "pos": target.tolist(), "color": "#5ab0ff", "radius": 0.014}])
     approach, pitch, q_hover, hover_pos, drop = plan.approach_for(target, z + RELEASE_ABOVE, yaw_deg)
     down = plan.line(q_hover, drop, approach=approach, allow_low=True)  # planned before anything moves
-    arm.joints(q_hover, speed=0.8, label="carrying")
+    carry(ctx, q_hover, hover_pos, speed=0.8, label="carrying")  # over what stands on the way, when the table has been scanned
     arm.joints(down, speed=0.5, allow_low=True, label="lowering")
     arm.joints(gripper=1.0, label="releasing")
     # back out along the same straight line, so the gripper cannot sweep what it just put down

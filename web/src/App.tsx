@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { stopEverything } from './actions.ts';
-import { api, startTransport } from './api/index.ts';
+import { startTransport } from './api/index.ts';
 import type { Insets, RobotScene } from './scene/RobotScene.ts';
 import { app } from './state/app.ts';
 import { useStore } from './state/store.ts';
@@ -13,7 +13,7 @@ import { StepsPanel } from './ui/StepsPanel.tsx';
 import { StopButton } from './ui/StopButton.tsx';
 import { Composer, Timeline } from './ui/Timeline.tsx';
 import { VoiceDock } from './ui/VoiceDock.tsx';
-import { CollabIcon, GhostIcon, StepsIcon, ViewIcon } from './ui/icons.tsx';
+import { GhostIcon, StepsIcon, ViewIcon } from './ui/icons.tsx';
 import { voice } from './voice/controller.ts';
 
 function isTextField(el: Element | null): boolean {
@@ -73,7 +73,6 @@ function useGlobalKeys(): void {
 
 export function App() {
   const transport = useStore(app, (s) => s.transport);
-  const collab = useStore(app, (s) => s.status?.collab ?? false);
   const sceneRef = useRef<RobotScene | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const talkRef = useRef<HTMLDivElement>(null);
@@ -175,16 +174,6 @@ export function App() {
               demo mode, nothing here is real
             </span>
           )}
-          <button
-            type="button"
-            className="chip-btn"
-            aria-pressed={collab}
-            onClick={() => void api.collab(!collab).catch(() => undefined)}
-            title="Working next to people: the arm pushes less hard, moves slower, and stops and backs off when it is touched. Gentler, not a safety guarantee."
-          >
-            <CollabIcon />
-            Collaboration {collab ? 'on' : 'off'}
-          </button>
           <button
             type="button"
             className="chip-btn"

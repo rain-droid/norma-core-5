@@ -43,7 +43,6 @@ export const api = {
   stop: () => active().stop(),
   interrupt: () => active().interrupt(),
   torque: (enable: boolean) => active().torque(enable),
-  collab: (enable: boolean) => active().collab(enable),
   chat: (text: string) => active().chat(text),
   utterance: (audio: Blob) => active().utterance(audio),
   camera: (name: string) => active().camera(name),

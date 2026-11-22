@@ -46,18 +46,14 @@ remains" first, then drawing on real paper (requirement 1 still holds with sort 
       cameras); the agent names each ("blue cube", "rubber ring") and the names are stored. About 1 h.
 - [x] **World model** (`state/world.json`), done with `world_model`, `grasp_object`, `put_object`; simulator only for the motion. Was: above the tracker: name and class, height, graspable width, shape,
       relations (on, in, next to), and what was tried on each object with its outcome. About 1.5 h.
-- [ ] **Try safe mode on the real arm:** `home` and free moves done (straight down within a degree, 0.4 to 4 mm off). Still to do: pick and place a cube inside the straight-down area
-      (within 16 cm either side of the base, 12 to 24 cm in front). The objects now on the table at y > 0.26
-      will be refused as too far: that is the intended behaviour, move them closer.
 - [ ] **Re-run `track_objects`, `pick_object`, `place_object` on the real arm** with the new top camera and the
       refitted `base_in_mat`. Needed for requirement 3. About 20 min.
 - [x] **`create_skill` tool** (done) and a line in `workspace/AGENTS.md` telling the agent to write a skill after a task
       it had no skill for. Requirement 4. About 30 min.
-- [ ] **Push the real arm in collaboration mode, and lead it by hand** (`collaboration`, `hand_guide`, `replay_demo`
-  are written and pass in the simulator; free moves on the real arm give no false stop). Needs a person at the arm:
-  switch "Collaboration on" in the web UI, send a move, push the arm lightly against it, expect `contact:`.
-  Then `hand_guide` and lead the gripper; if it is too stiff or creeps, change `guide_deadband` / `guide_gain` in `config.yaml`.
-- [x] **`record_demo` / `replay_demo`** became `hand_guide` + `replay_demo`, with the motors left on (see DECISIONS). Was:: torque off, a person moves the arm, joint angles and jaw are recorded;
+- [ ] **Lead the real arm by hand** (`hand_guide`, `replay_demo`: written, pass in the simulator, held still for 8 s
+  untouched on the real arm). Needs a person at the arm; if it is too stiff or creeps, change `guide_deadband` /
+  `guide_gain` in `config.yaml`. Requirement 6.
+- [x] **`record_demo` / `replay_demo`** became `hand_guide` + `replay_demo`, with the motors left on (see DECISIONS). Was: torque off, a person moves the arm, joint angles and jaw are recorded;
       replay as joint commands. Requirement 6. About 1.5 h.
 - [ ] **Record the zero-shot runs** (requirement 2): cube onto the pink box, push to a corner, wave.
 - [ ] **Record the failure-recovery runs** (requirement 3): cube taken away mid-reach; cube nudged.
@@ -82,6 +78,22 @@ remains" first, then drawing on real paper (requirement 1 still holds with sort 
       objects in `find_objects`. Proper fix is lens intrinsics with `scripts/calibrate_camera.py`.
 - [ ] **30 fps:** `frame-skip: 0` in `station/station.yaml` doubles the stored frame rate and the disk writes.
 
+## Two arms (2026-11-22, afternoon)
+
+- [x] Depth camera (Orbbec DaBai DCW2) calibrated; `depth_scan`
+- [x] SO-101 as a second arm on its own daemon; both arms in the web UI's 3D view
+- [x] Hand-over of a cube from the ElRobot to the SO-101: about two in three, unattended
+- [x] One collision-checked space for both arms, wrist cameras included
+- [x] Things on the table as obstacles from the depth camera; carrying over them
+- [ ] **Fit the SO-101 at table level** (set a cube down at five spots, measure with the top camera), or put a
+      tag on its camera mount. It is 2.5 to 4.5 cm off there, which is why stacking by it failed. About 30 min.
+- [ ] **Stack with both arms** once that is done (`second_arm_stack`), or swap the roles: the SO-101 feeds by
+      hand-over and the ElRobot stacks.
+- [ ] **Guide the SO-101's grip with the ElRobot's wrist camera**, which sees the cube and both jaws at the
+      hand-over, to get from two in three to nine in ten.
+- [ ] One Pinocchio model for both arms with Pink's collision barriers, so a path bends round the other arm
+      instead of being refused.
+
 ## Done (2026-11-22, early hours)
 
 - [x] Chess, drawing and `plan_grasp` tools and skills, passing in the simulator
@@ -93,7 +105,7 @@ remains" first, then drawing on real paper (requirement 1 still holds with sort 
 - [x] Docs: FEATURES, DECISIONS, INTERFACE, this plan
 - [x] Chat box and microphone drive the workspace agent; speech in and out on Linux (Parakeet v3, Phonon);
       English, French and German
-- [x] Safe mode: straight-down grasps, straight-line travel, too-far objects refused (simulator only so far)
+- [x] Safe mode and collaboration mode: built, tried on the real arm, removed as too restrictive (see DECISIONS)
 - [x] Web UI camera panel: switch between all cameras; live layers for objects, tags, robot frame, arm, tool results
 - [x] A blocked move is tried once more, slower (`blocked_retry_speed` in `workspace/robot_config/motion.json`,
       default 0.5); tests in `workspace/tests`. Not yet seen on the real arm

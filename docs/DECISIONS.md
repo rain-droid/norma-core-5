@@ -6,6 +6,59 @@ from commit messages, `CLAUDE.md` and `workspace/AGENTS.md`, not witnessed.
 
 ## 2026-11-22
 
+**The shared space checks paths; it does not search for them.** Both arms are capsules in one frame, and a
+path is walked against the other arm and against the depth camera's height map before it is sent. A path that
+fails is refused with the reason. The one planning rule is for carrying: up, across above the tallest thing on
+the line, down. That covers a table top, where everything stands on one surface. Joining both arms into one
+Pinocchio model and letting Pink's collision barriers bend the path (both are installed and support it), or a
+planner such as cuRobo on the laptop's GPU, would be the next step up; neither was needed to stop the arms
+hitting each other, and neither fixes what limits the hand-over, which is a centimetre of calibration.
+
+**Obstacle maps expire after two minutes.** The arms move the very things the map shows. A stale map refuses
+moves through places that are now empty and allows moves through things that were put there since, and the
+second is the dangerous one. So a map is only used while fresh, and a tool that needs it scans first.
+
+**The second arm runs the teammate's branch as its own process; it is not merged.** The `autopilot` branch
+has what an SO-101 needs (profile, URDF with the parallel gripper, servo calibration, IK for five joints) but
+forks from an early commit and rewrites `robot.py`, `kinematics.py` and `skills.py`, which have since changed
+here beyond a merge an hour before submission. Run as a second daemon on the same Station it needed no change
+at all; the workspace talks to it over its HTTP tools.
+
+**The two arms are tied together by the depth camera, not by a ruler.** The SO-101 carries a coloured block
+through a dozen places; the camera measures the block, the SO-101 reports its tool point, and the rigid fit
+between the two sets is where it stands. The camera sees only the faces turned to it, so its "middle" is off
+by a centimetre or two, but it is off the same way when the ElRobot later holds a thing out, so the error
+largely cancels: measure and use with the same sensor.
+
+**A small thing is handed over by its lower half, from below.** Both grippers are wider than a 3 cm cube.
+Held by the ElRobot's fingertips at its top, the cube's lower half hangs free; the SO-101, which has no level
+pose closer than about 24 cm to its own base and therefore no room for a run-in, comes up from 5 cm below
+with its jaws level and open around it. Height is the tight direction (about 1 cm), and the SO-101 sags by a
+varying amount when stretched out, so after arriving it is lifted until its own joint readings match.
+
+**The depth camera is read with Orbbec's old SDK, built from source.** The DaBai DCW2's depth sensor speaks
+Orbbec's OpenNI protocol. The current SDK (`pyorbbecsdk2` 2.1.3) lists the USB device and matches no driver to
+it; the old one reads it, but its Linux wheel on PyPI (`pyorbbecsdk` 1.3.2) contains macOS libraries. So
+`scripts/orbbec_setup.sh` builds the v1 bindings from Orbbec's repository into `bin/orbbec/` (not committed),
+for the project's Python. The Station keeps the colour camera; the depth sensor is a separate USB device, so
+the two do not compete.
+
+**The depth sensor is placed from the mat's plane and two tags, not from a full pose fit.** The colour camera
+sees only the two corner tags on the robot's side, small and at the same distance: a pose from those alone is
+weak in tilt. The mat fills the depth picture, so its plane gives height and tilt to a millimetre, and the two
+tag centres, followed down their sight lines to that plane, give the remaining turn and shift. The distance
+between the two tags comes out 2 mm off the ruler's 585 mm, which checks the camera's own calibration too.
+
+**RoboHarness's ARX_X5 workspace is the model for this one, and is not copied into it.** With a fixed depth
+camera the rig now resembles theirs, and the layout here (one file per tool, `robot_config/`, `perception/`,
+skills, frozen images, call history) already follows it. Its code does not carry over: about 39 000 lines of
+`tools/util` built on the X5's link geometry and gripper (`x5_kinematics`, `x5_grasp_planner`, 4 300 lines),
+on a 14-value two-arm command, and on the RoboDojo evaluator's loop (tools are generators that hand one
+action per tick to a simulator, plans are signed per session), with simulator depth already aligned to the
+colour picture. Porting the grasp planner to a seven-joint arm with soft servos and a noisy real depth
+picture is days of work, not the two hours before submission. What its depth tools do is added here on this
+arm's own motion code instead, starting with `depth_scan`.
+
 **Hand-guiding keeps the motors on.** The usual way to teach a hobby arm by hand is to switch torque off and
 record while a person carries it; on this arm that drops the gripper onto whatever is under it the moment the
 person lets go. The Station leaves the servos on a soft proportional gain, so a hand already displaces a joint
@@ -14,27 +67,14 @@ goes where it is led and holds when released. The joint's slow error, which is g
 subtracted so the arm does not creep; the price is that a push held still fades after a few seconds. What is
 saved is joint angles: a replay repeats the motion exactly and knows nothing about where the objects are now.
 
-**Collaboration mode is a reflex on top of position control, not impedance control.** The ST3215 servos take a
-position and hold it; they have no torque command, and at 7.5 V little torque to spare. So "compliant" here
-means three things done in the daemon, where the 50 Hz loop already reads every joint: a lower torque limit
-(how hard the arm can push before the servo gives), a speed cap, and a reflex that treats a sudden step in a
-joint's load or lag as a touch, stops, and retreats along the path it came by. A step is judged against the
-joint's own last quarter second, not a fixed level, because gravity and the move itself load the joints far
-more than a hand does, but slowly. It lives in the daemon and not in the workspace so that every tool, and
-any script the agent writes, gets it. The honest limits: the arm is felt before it yields (about 80 ms plus
-the servo's own stiffness), a false trigger stops a task that had nothing wrong with it, and guarded touch
-moves do not use it. The error kind is `contact`, separate from `blocked`, because the right answer to
-`blocked` is "again, slower" and the right answer to `contact` is "look first".
-
-**Safe mode trades reach for predictability.** With it on, the gripper only points straight down and only
-travels in straight lines, so nothing swings through the space above the table and a person can see where it
-will go. It is enforced where every tool ends, in `Arm.joints` (`util/arm.py`): a single target is replaced by
-an up, across, down route or refused, so tools written later, and scripts the agent writes, obey it without
-knowing about it. The cost is large and worth stating: straight down, this arm works in an area of about
-32 by 12 cm and no higher than 7 cm, against 36 cm of reach when it may lean; objects beyond that are refused,
-not attempted, and a carried object clears only about 4 cm. Two moves are not lines, both in the air: getting
-up from and sitting down on the resting seat, and reaching the straight-down posture from a pose that is not.
-Chess (`turn_aside`, leaning grasps at the far ranks) does not work with it on.
+**Safe mode and collaboration mode were removed the morning they were tried.** Safe mode (gripper straight
+down only, straight-line travel, refuse what is too far) left the arm an area of about 32 by 12 cm and 7 cm of
+height, against 36 cm of reach when it may lean: most of the table was "too far". Collaboration mode (lower
+torque limit, speed capped at 0.6, stop and back off on a touch) made every task slower for a touch detection
+nobody had needed yet. Both restricted the arm more than the demo could afford, so the code is gone, not
+switched off: `git show 7027d7e` has both if they are wanted again. What remains for working near people is
+what was there before: the stall guard (`blocked`), the tracker slowing the arm when something moves on the
+table, and `stop`. Hand-guiding stayed; it restricts nothing.
 
 **The chat box and the microphone drive the workspace agent, not a second tool set.** There were two agents: the
 workspace one (top camera, calibration, names, checks) and the voice one, which only saw the daemon's older

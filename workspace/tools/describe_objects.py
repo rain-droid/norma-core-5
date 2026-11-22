@@ -12,8 +12,8 @@ It also notices a hole: an object the table shows through (a ring, a roll of tap
 
 Each entry of `objects` has the key, the name and kind if it has been named before, colour,
 position (metres, base frame), size, shape, whether it is `new` since the last look, and
-`reachable`: whether the gripper can get to it at all. In safe mode that means straight down,
-which only works close in; say so to the person before promising to pick up something that is not.
+`reachable`: whether the gripper can get to it at all; say so to the person before promising
+to pick up something that is not.
 `unseen` lists known objects this look did not find (hidden, taken away, or held).
 
 Does not move the arm; bring it `home` or to `rest` first if it covers what you want to see.
@@ -76,7 +76,7 @@ def describe_objects(ctx, max_objects: int = 8) -> dict:
     items = [(k, world["objects"][k], m) for k, m in zip(keys, marks)]
     listed = []
     for k, o, _ in items:
-        try:  # can the gripper get to it? In safe mode that means straight down, which is a small area
+        try:  # can the gripper get to it?
             ctx.plan.approach_for(np.array([o["x"], o["y"], ctx.plan.table_z]), 0.025, float(o.get("yaw_deg") or 0.0))
             reachable = True
         except RobotError:
