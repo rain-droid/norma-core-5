@@ -16,6 +16,7 @@ around it and send joint angles yourself.
 | `tools/` | One Python file per tool: its whole algorithm and its own command. `tools/util/` is the shared code: `arm.py` is the contract with the robot, `planning.py` and `kinematics.py` the IK. |
 | `perception/` | The live senses, rewritten twice a second and after every command: `latest.json`, `exteroception/{top,wrist}/rgb.jpg`, `proprioception/state.json`. While the tracker runs, also `exteroception/tracks.json`: every object on the table by name, ten times a second. |
 | `skills/` | Task procedures in Markdown, written from experience with this arm. Take up the one that fits before starting (`activate_skill`). |
+| `state/world.json` | The world model: every object by key and name, where it was last seen, its shape, what it stands on, what was done with it. |
 | `tool_call_history/` | One folder per call: `input.json`, `result.json`, `joint_commands.jsonl` (every command sent), images. |
 | `state/` | What a task remembers between calls: the chess game and board (`chess.json`), the drawing, sheet and pen (`drawing.json`). Delete a file to forget it. |
 
@@ -48,12 +49,13 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Gripper | `open_gripper`, `close_gripper` | jaws only |
 | Whole manipulations, by tracked name | `pick_object`, `place_object` | yes |
 | Whole manipulations, by position | `pick_at`, `place_at` | yes |
+| Objects by name: what is on the table, and pick and place by name | `describe_objects`, `name_objects`, `world_model`, `grasp_object`, `put_object` | only `grasp_object`, `put_object` |
 | A pick the wrist camera checks before and after | `pick_verified` | yes |
 | Choosing a grasp among neighbours | `plan_grasp` | only with `pick: true` |
 | Chess on a physical board | `chess_setup`, `chess_see`, `chess_move`, `chess_record` | `chess_move`; `chess_setup` and `chess_see` turn the arm aside |
 | Drawing with a pen | `draw_plan`, `draw_pen`, `draw_run` | `draw_pen`, `draw_run` |
 | Poses and safety | `home`, `rest`, `stop` | `stop` always works |
-| Skills | `activate_skill`, `deactivate_skill` | no |
+| Skills | `activate_skill`, `deactivate_skill`, `create_skill` | no |
 | Telling the people watching what comes next | `show_steps` | no |
 
 A session usually goes: `activate_skill` for the task, `home` (wakes the arm and gets it out
@@ -69,6 +71,40 @@ stopped, and quiet does not mean nobody is there: the arm runs at full speed wit
 hand in view. Keep people clear of the arm.
 `pick_at` and `place_at` go
 to the numbers you give them and check nothing; use them for what the tracker cannot see.
+
+## Objects have names
+
+`find_objects` and the tracker know colours, not things: a rubber ring and a cube are both `red`.
+So before a task that names things, look and name them: `describe_objects` returns a picture
+sheet with one cut-out per object; open it and write down what each is with `name_objects`
+("blue cube", "rubber ring"). The names live in the world model (`state/world.json`) and stay
+with an object when it is moved. After that, work by name: `grasp_object` "the ring",
+`put_object` on "the pink box", `world_model` to read what is where and what was done with it.
+`grasp_object` looks again before it reaches, grips a ring by its rim, and has the wrist camera
+check the grasp. When the person talks about a thing, use their word for it as its name.
+
+## Safe mode
+
+`robot_config/motion.json` has `"safe_mode": true`. While it is on (tools/util/safe.py):
+
+- the gripper only ever points straight down, with the jaws turned to suit the object;
+- every move is straight lines: up to a low carry height, across, down. No arcs;
+- anything that cannot be done that way is refused before the arm moves.
+
+Pointing straight down, this arm reaches about 16 cm either side of the base and 12 to 24 cm in
+front of it, and no higher than about 7 cm. So an object further out is **too far**: the tool
+says so, `describe_objects` marks it `reachable: false`, and the right answer is to tell the
+person and ask them to move it closer. Do not look for a way round it: no leaning poses, no
+`check: false`, no joint commands of your own, and do not switch safe mode off yourself. A person
+who is supervising may switch it off; then the arm leans and reaches about 36 cm again. Carried
+objects travel only about 4 cm above the table, so do not carry one over something taller.
+
+## Leave a skill behind
+
+When you finish a task that no skill in `skills/` covered, write one with `create_skill` before
+you report: the steps that worked, what to check, what went wrong and what fixed it. It appends
+the tool calls you actually made. The next agent, or you in the next session, starts from it
+instead of from nothing. If you followed a skill and found a better way, replace it.
 
 ## The tools are a ladder, not a fence
 

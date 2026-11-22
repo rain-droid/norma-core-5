@@ -2,6 +2,8 @@
 
 One joint command to fixed joint angles (util/motion.py READY_DEG). A safe place to start, to
 finish, and to return to when a pose has become awkward. Switches the motors on if they were off.
+In safe mode (util/safe.py) the ready pose points straight down instead, low over the near
+middle of the table, and from there on the arm only travels in straight lines.
 
 Two cases get a lead-in first, because a joint-space move sweeps the gripper along an arc:
 from the resting seat the arm first rises to the pose just above it, the way it sat down; and
@@ -14,6 +16,7 @@ refused it as blocked.
 
 import numpy as np
 
+from util import safe
 from util.arm import RobotError
 from util.motion import READY_DEG, require_ready, seat, tcp_report
 
@@ -32,7 +35,8 @@ def home(ctx, speed: float = 0.5) -> dict:
             ctx.arm.joints(up, speed=min(speed, 0.5), allow_low=True, label="lifting clear")
         except RobotError:
             pass  # no straight lift exists from here; the joint move below is all that is left
-    res = ctx.arm.joints(np.radians(READY_DEG), speed=speed, label="going home")
+    target = safe.ready(ctx.plan) if safe.enabled() else np.radians(READY_DEG)  # safe mode: pointing straight down, at carry height
+    res = ctx.arm.joints(target, speed=speed, label="going home")
     return {"pose": "ready", "tcp": tcp_report(res["tcp"], res["gripper"])}
 
 

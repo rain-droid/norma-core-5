@@ -154,6 +154,11 @@ class Arm:
         then carries `retried_blocked`, the first refusal. `retry_blocked=False` for a move that
         is meant to stop on contact.
         """
+        if path is not None:
+            from util import safe  # imported here: safe mode plans with util/planning.py, which imports this file
+
+            if safe.enabled():
+                path = safe.linear(self, path, label, allow_low)  # straight lines, gripper straight down, or a refusal
         body: dict = {"source": self.source, "call_id": self.call_id, "label": label, "speed": speed, "check": check, "allow_low": allow_low}
         if path is not None:
             p = np.asarray(path, dtype=float)
@@ -166,6 +171,14 @@ class Arm:
         if not res["ok"]:
             raise RobotError(res["error"])
         return res
+
+    def planner(self):
+        """IK and straight lines for this arm (util/planning.py), made once."""
+        if getattr(self, "_planner", None) is None:
+            from util.planning import Planner
+
+            self._planner = Planner(self)
+        return self._planner
 
     def _send(self, body: dict) -> dict:
         res = _request("/api/joints", body, timeout=300.0)

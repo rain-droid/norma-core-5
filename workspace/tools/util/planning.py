@@ -59,6 +59,10 @@ class Planner:
     def reach(self, pos, *, yaw: float | None = None, pitches=(90, 75, 60, 45, 30, 15), **kw) -> tuple[IKResult, float | None]:
         """Try progressively flatter approaches until one reaches `pos`: straight-down poses only
         exist close in, further out the gripper has to lean forward."""
+        from util import safe
+
+        if safe.enabled():
+            pitches = (90,)  # straight down, or not reached
         best: IKResult | None = None
         for pitch in pitches:
             r = self.solve(pos, pitch=pitch, yaw=yaw, **kw)
@@ -90,6 +94,31 @@ class Planner:
                 raise RobotError(f"straight-line move rejected: {why}")
         return path
 
+    def _approach_straight_down(self, target, grasp: np.ndarray, grasp_z: float, yaw: float | None, seed: np.ndarray):
+        """approach_for in safe mode: straight down or not at all. The jaws are turned as asked,
+        or the half turn that is the same grasp, whichever the wrist can do. The hover point is
+        straight above the grasp at the carry height."""
+        from util import safe
+
+        a = safe.DOWN.copy()
+        hover_pos = np.array([grasp[0], grasp[1], max(grasp[2] + 0.02, self.table_z + safe.carry_height())])
+        last = None
+        want = 0.0 if yaw is None else float(yaw)
+        for turn in (want, want + 180.0):
+            jaw = jaw_from_yaw(a, turn)
+            rg = self.kin.ik(grasp, approach=a, jaw=jaw, q_seed=seed, limit_margin=self.margin, accept=lambda q: self.blocked(q, True) is None)
+            if not rg.ok:
+                last = rg
+                continue
+            rh = self.kin.ik(hover_pos, approach=a, jaw=jaw, q_seed=rg.q, limit_margin=self.margin, accept=lambda q: self.blocked(q, False) is None)
+            if rh.ok:
+                return a, 90.0, rh.q, hover_pos, grasp
+            last = rh
+        d = math.hypot(target[0], target[1] - 0.04)
+        where = (f"it is {d * 100:.0f} cm from the base" if d > 0.20 or d < 0.09 else "the wrist cannot turn the jaws that way there")
+        raise RobotError(f"too far for safe mode: can't come straight down on x={target[0]:+.3f} y={target[1]:+.3f} ({where}). "
+                         f"Pointing straight down the arm reaches {safe.AREA}. Ask for it to be moved closer; do not try another way.")  # fmt: skip
+
     def approach_for(self, target, grasp_z: float, yaw: float | None, hover: float = 0.07):
         """Choose how to come down on a table point.
 
@@ -101,6 +130,10 @@ class Planner:
         """
         grasp = np.array([target[0], target[1], self.table_z + grasp_z])
         seed = np.radians(READY_DEG)
+        from util import safe
+
+        if safe.enabled():
+            return self._approach_straight_down(target, grasp, grasp_z, yaw, seed)
         last = None
         refused: list[str] = []  # what the envelope said about each pose IK reached but may not use
 
