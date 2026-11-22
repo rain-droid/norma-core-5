@@ -259,3 +259,105 @@ def test_grasp_planner_avoids_a_neighbour(robot):
     assert world.held is not None and world.held.name == "red cube"
     blue = next(b for b in world.blocks if b.name == "blue cube")
     assert np.allclose(blue.xy, [0.105, 0.20])
+
+
+def test_objects_by_name_and_the_world_model(robot):
+    root, world = robot
+    world.blocks = [
+        Block("red cube", np.array([0.07, 0.20]), (0.025, 0.025), 0.025, (60, 60, 220)),
+        Block("blue cube", np.array([-0.08, 0.22]), (0.025, 0.025), 0.025, (210, 120, 40)),
+        Block("green block", np.array([0.0, 0.28]), (0.045, 0.022), 0.022, (80, 180, 70)),
+    ]
+    run("home")
+    run("open_gripper")  # whatever an earlier test left in the jaws
+    assert run("world_model", reset=True)["objects"] == []
+
+    seen = run("describe_objects")
+    assert "error" not in seen, seen
+    assert sorted(o["colour"] for o in seen["objects"]) == ["blue", "green", "red"]
+    assert all(o["new"] and o["shape"] == "solid" for o in seen["objects"]) and (root / seen["sheet_image"]).is_file()
+    keys = {o["colour"]: o["key"] for o in seen["objects"]}
+
+    named = run("name_objects", names={keys["red"]: {"name": "red cube", "kind": "cube"}, keys["blue"]: "blue cube", keys["green"]: {"name": "green bar", "kind": "block"}})
+    assert {o["name"] for o in named["objects"]} == {"red cube", "blue cube", "green bar"}
+    assert "already the name" in run("name_objects", names={keys["blue"]: "red cube"})["error"]
+    assert "no object called" in run("grasp_object", object="the banana")["error"]
+
+    # the person moves the blue cube: it keeps its name
+    next(b for b in world.blocks if b.name == "blue cube").xy = np.array([-0.10, 0.30])
+    again = run("describe_objects")
+    blue = next(o for o in again["objects"] if o["key"] == keys["blue"])
+    assert blue["name"] == "blue cube" and not blue["new"] and abs(blue["y"] - 0.30) < 0.01
+
+    got = run("grasp_object", object="the red cube")
+    assert got.get("holding") and got["object"] == keys["red"], got
+    assert world.held is not None and world.held.name == "red cube"
+    model = run("world_model")
+    assert model["holding"] == keys["red"]
+    assert next(o for o in model["objects"] if o["key"] == keys["red"])["state"] == "held"
+    assert "already holding" in run("grasp_object", object="blue cube")["error"]
+
+    put = run("put_object", on="green bar")
+    assert put["on"] == keys["green"] and put["released_something"], put
+    red = next(b for b in world.blocks if b.name == "red cube")
+    green = next(b for b in world.blocks if b.name == "green block")
+    assert np.linalg.norm(red.xy - green.xy) < 0.015 and red.z > 0.015, "the red cube is not standing on the green bar"
+    record = run("world_model", object="red cube")
+    assert record["on"] == keys["green"] and record["state"] == "on_table"
+    assert [h["action"] for h in record["log"]] == ["grasp", "put"]
+
+
+def test_a_ring_is_seen_as_a_ring_and_gripped_by_its_rim(robot):
+    import cv2
+
+    root, _ = robot
+    from grasp_object import rim_points
+    from util import capture, world as W
+    from util.arm import Arm
+
+    meta = Arm().meta()
+    cam = capture.TopCamera(root, meta["mode"], meta["table_z"])
+    # paint a ring and a disc of the same size onto a plain table, as the top camera would see them
+    img = np.full((480, 640, 3), (150, 185, 210), np.uint8)
+
+    def outline(cx, cy, r, n=48):
+        return np.array([cam.to_pixel([cx + r * np.cos(a), cy + r * np.sin(a), meta["table_z"]]) for a in np.linspace(0, 2 * np.pi, n, endpoint=False)], np.int32)
+
+    cv2.fillPoly(img, [outline(0.05, 0.25, 0.035)], (40, 40, 150))
+    cv2.fillPoly(img, [outline(0.05, 0.25, 0.018)], (150, 185, 210))  # the table through the hole
+    cv2.fillPoly(img, [outline(-0.10, 0.25, 0.035)], (40, 40, 150))  # a solid disc
+    ring = W.ring_of(img, outline(0.05, 0.25, 0.035).tolist(), cam, 0.0)
+    assert ring is not None and abs(ring["x"] - 0.05) < 0.004 and abs(ring["y"] - 0.25) < 0.004, ring
+    assert abs(ring["hole_mm"] - 36) <= 5 and abs(ring["band_mm"] - 17) <= 5 and abs(ring["r_mid_mm"] - 26) <= 4, ring
+    assert W.ring_of(img, outline(-0.10, 0.25, 0.035).tolist(), cam, 0.0) is None
+
+    points = rim_points({"x": ring["x"], "y": ring["y"], "ring": ring})
+    for p in points:  # on the band, left and right of the centre as the arm reaches out
+        assert abs(np.linalg.norm(p - [0.05, 0.25]) - ring["r_mid_mm"] / 1000) < 0.002
+        assert abs(float((p - [0.05, 0.25]) @ (np.array([0.05, 0.25]) / np.linalg.norm([0.05, 0.25])))) < 0.002
+    assert abs(points[0][0]) < abs(points[1][0])
+
+
+def test_a_new_skill_is_written_with_the_calls_behind_it(robot):
+    root, world = robot
+    world.blocks = [Block("red cube", np.array([0.07, 0.20]), (0.025, 0.025), 0.025, (60, 60, 220))]
+    run("home")
+    run("open_gripper")
+    run("world_model", reset=True)
+    run("describe_objects")
+    assert "no object called" in run("grasp_object", object="the banana")["error"]  # a failure belongs in the record too
+
+    steps = "1. `home`, then `describe_objects` and name what is there.\n2. `grasp_object` the cube, `put_object` it where it belongs.\n\nDone when the table is sorted and the arm is at `rest`."
+    assert "lower-case words" in run("create_skill", name="Sort Things", description="x", steps=steps)["error"]
+    made = run("create_skill", name="sort-by-colour", description="Sort the cubes on the table into groups by colour.", steps=steps, calls=6)
+    assert "error" not in made and made["calls_recorded"] >= 3, made
+    text = (root / made["file"]).read_text()
+    assert text.startswith("---\nname: sort-by-colour\ndescription: Sort the cubes") and "## How it was done the first time" in text
+    assert "`describe_objects`" in text and "FAILED: no object called 'the banana'" in text
+    listed = run("activate_skill")
+    assert "sort-by-colour" in json.dumps(listed)
+    assert "already a skill" in run("create_skill", name="sort-by-colour", description="Sort the cubes a second way.", steps=steps)["error"]
+    assert run("create_skill", name="sort-by-colour", description="Sort cubes by colour, better.", steps=steps, replace=True)["skill"] == "sort-by-colour"
+    taken_up = run("activate_skill", name="sort-by-colour")
+    assert taken_up["active_skill"] == "sort-by-colour" and "`grasp_object` the cube" in taken_up["instructions"]
+    assert "Sort cubes by colour, better." in (root / made["file"]).read_text()
