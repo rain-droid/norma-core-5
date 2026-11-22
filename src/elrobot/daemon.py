@@ -376,6 +376,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
         return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame", headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/camera/{name}/vision")
+    async def camera_vision(name: str):
+        """What the vision sees in that camera's newest frame, for the web UI to draw (vision_live.py)."""
+        from . import vision_live
+
+        out = await asyncio.to_thread(vision_live.analyse, hub, name)
+        if out is None:
+            raise HTTPException(404, f"no frame from camera '{name}'")
+        return out
+
     @app.post("/api/tools/{name}")
     async def run_tool(name: str, request: Request):
         try:

@@ -108,6 +108,11 @@ and a `kind`. Kinds:
 
 - `GET /api/camera/{name}/frame.jpg` → latest JPEG (`404` if no frame yet).
 - `GET /api/camera/{name}/stream.mjpg` → `multipart/x-mixed-replace` MJPEG stream.
+- `GET /api/camera/{name}/vision` → what the vision sees in the newest frame, for the web UI's camera panel
+  (`src/elrobot/vision_live.py`): `{camera, width, height, seq, ms, layers}`. `layers.objects` are segmented
+  outlines (`label` a colour word, `polygon`, `box`, `point`), `layers.tags` AprilTags; for `top`, when its
+  calibration matches the frame size, also `layers.frame` (base axes and reach limits) and `layers.arm` (the arm as
+  the kinematics place it). Computed on request and cached per frame; display only. `404` if no frame yet.
 
 ### Tools
 

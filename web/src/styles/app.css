@@ -689,6 +689,127 @@
   background: var(--red);
 }
 
+/* Controls laid over the picture: which camera, and what is drawn on it. */
+.camera__bar {
+  position: absolute;
+  left: 0.45rem;
+  right: 0.45rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: default;
+  pointer-events: none;
+}
+
+.camera__bar > * {
+  pointer-events: auto;
+}
+
+.camera__bar--top {
+  top: 0.45rem;
+  /* The frame-rate badge keeps the right-hand corner. */
+  padding-right: 4.2rem;
+}
+
+.camera__bar--bottom {
+  bottom: 0.45rem;
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+}
+
+.camera__tabs,
+.camera__layers {
+  display: inline-flex;
+  gap: 0.15rem;
+  padding: 0.15rem;
+  border-radius: 0.5rem;
+  background: rgba(7, 11, 44, 0.74);
+}
+
+.camera__tabs button,
+.camera__layers button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem 0.12rem;
+  border-radius: 0.38rem;
+  color: var(--chalk-dim);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.camera__tabs button:hover,
+.camera__layers button:hover {
+  color: var(--paper);
+  background: rgba(227, 235, 255, 0.12);
+}
+
+.camera__tabs button[aria-selected='true'] {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.camera__tabs button[data-fresh='false'] {
+  opacity: 0.55;
+}
+
+.camera__tabs .dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--chalk-dim);
+}
+
+.camera__tabs button[data-fresh='true'] .dot {
+  background: var(--red);
+}
+
+.camera__layers button[aria-pressed='true'] {
+  background: var(--yellow);
+  color: var(--ink);
+}
+
+.camera__tabs button:focus-visible,
+.camera__layers button:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 1px;
+}
+
+.camera__note {
+  padding: 0.18rem 0.45rem 0.1rem;
+  border-radius: 0.38rem;
+  background: rgba(7, 11, 44, 0.74);
+  color: var(--chalk);
+  font-size: var(--t-micro);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.camera__note:empty {
+  display: none;
+}
+
+.camera.is-large .camera__bar {
+  left: 0.8rem;
+  right: 0.8rem;
+}
+
+.camera.is-large .camera__bar--top {
+  top: 0.8rem;
+}
+
+.camera.is-large .camera__bar--bottom {
+  bottom: 0.8rem;
+}
+
+.camera.is-large .camera__tabs button,
+.camera.is-large .camera__layers button,
+.camera.is-large .camera__note {
+  font-size: var(--t-small);
+}
+
 .camera__empty {
   position: absolute;
   inset: 0;
@@ -728,6 +849,9 @@
 }
 
 .camera.is-large .camera__view {
+  /* Everything inside is laid over the picture, so the view needs its own shape. */
+  height: auto;
+  aspect-ratio: var(--cam-aspect, 4 / 3);
   cursor: zoom-out;
   border-radius: calc(var(--r-xl) - 0.55rem);
 }

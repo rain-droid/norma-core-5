@@ -1,5 +1,5 @@
 import type { CameraSource, Transport, TransportHandlers } from './transport.ts';
-import type { ChatResult, ServerMessage, ToolResult, UtteranceResult } from './types.ts';
+import type { ChatResult, ServerMessage, ToolResult, UtteranceResult, VisionFrame } from './types.ts';
 
 const BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
 /** `state` arrives at ~30 Hz, so this much silence means the socket is dead. */
@@ -147,5 +147,14 @@ export class LiveTransport implements Transport {
 
   camera(name: string): CameraSource {
     return { kind: 'mjpeg', url: `/api/camera/${encodeURIComponent(name)}/stream.mjpg` };
+  }
+
+  async vision(name: string): Promise<VisionFrame | null> {
+    try {
+      const res = await fetch(`/api/camera/${encodeURIComponent(name)}/vision`, { cache: 'no-store' });
+      return res.ok ? ((await res.json()) as VisionFrame) : null;
+    } catch {
+      return null;
+    }
   }
 }

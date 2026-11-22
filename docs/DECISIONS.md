@@ -6,6 +6,16 @@ from commit messages, `CLAUDE.md` and `workspace/AGENTS.md`, not witnessed.
 
 ## 2026-11-22
 
+**The web UI's live vision is worked out by the daemon, on request, and is for display only.** The camera
+panel asks `GET /api/camera/{name}/vision` a few times a second while a live layer is switched on; nothing is
+computed when nobody is looking, and the result is cached per frame. It draws object outlines, AprilTags, the
+robot's frame and reach, and the arm as the kinematics place it. It deliberately does not feed the tools: they
+keep their own, slower and more careful measurements (`find_objects`, the tracker). The "Arm" layer is the
+quickest check that calibration still holds: the line should lie on the real arm.
+
+**The camera panel shows every camera, not only the wrist.** It opens on `top`, which sees the whole table;
+the choice and the layers are remembered in the browser, and `?camera=...&layers=...` in the address sets them.
+
 **Chess, drawing and the grasp planner were added to the existing workspace, not built as a second harness.**
 A separate harness was started from scratch before this repo was found; it duplicated the robot layer and had
 never touched hardware. The new capabilities were ported to the workspace's conventions instead. The prototype

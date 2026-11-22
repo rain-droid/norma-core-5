@@ -6,13 +6,13 @@ cameras:
   "0x1312402c7f4a60": wrist
   "0x1312202c7f4a60": top
   # Linux ids are vendor:product:bus:device and change when a camera is replugged; re-run scripts/probe.py then.
-  "11391:19040:5:6": wrist
+  "11391:19040:5:17": wrist
   # The UGREEN webcam (vendor:product 3141:8835) hangs over the mat and is the camera to measure with.
   # Its id needs no bus:device part, there is only one. Before the Station starts, give it a short fixed
   # exposure so the mat's corner tags decode: scripts/cameras_ready.sh
   "3141:8835": top
   # the KD camera across the table that used to be `top`; its calibration is robot_config/camera_top.kd-backup.json
-  "11391:19040:5:4": across
+  "11391:19040:5:15": across
 
 # The base stands on the table; the mat's top surface is 10 mm above it.
 table_z: 0.010

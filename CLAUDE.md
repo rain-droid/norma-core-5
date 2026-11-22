@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | The daemon's HTTP and WebSocket API | `docs/API.md` |
 | How an agent should operate the arm | `workspace/AGENTS.md` and `workspace/skills/` |
 | What is left to do before the submission, and in what order | `docs/PLAN.md` |
+| What changed, when, and who changed it | `docs/CHANGELOG.md` |
 | Current state and next steps | `docs/HANDOFF.md` |
 
 ## What this is

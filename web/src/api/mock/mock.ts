@@ -875,4 +875,9 @@ export class MockTransport implements Transport {
       },
     };
   }
+
+  /** The demo has no vision of its own; the panel shows what the pretend tools report. */
+  vision(_name: string): Promise<null> {
+    return Promise.resolve(null);
+  }
 }

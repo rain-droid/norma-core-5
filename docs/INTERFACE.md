@@ -114,7 +114,8 @@ and its images. A capture's folder name is its `image_id`.
 
 Reads: `GET /api/state` (`connected`, `calibrated`, `torque`, `joints[]` with `q`, `lower`, `upper`, `load`,
 `temp`, `error`; `gripper`; `ee`; `cameras[]` with `name`, `width`, `height`, `age_ms`), `GET /api/meta`
-(`mode` real or sim, `table_z`, `clearance`), `GET /api/camera/{name}/frame.jpg`. Also `POST /api/torque`,
+(`mode` real or sim, `table_z`, `clearance`), `GET /api/camera/{name}/frame.jpg`, `GET /api/camera/{name}/vision` (what the vision sees in that frame, for
+the web UI only). Also `POST /api/torque`,
 `POST /api/event` (display only).
 
 ## Cameras
