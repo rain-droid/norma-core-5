@@ -66,6 +66,8 @@ LAG_LOOKS = 3  # the camera runs behind the joint angles: the arm is masked wher
 RENAME_LOOKS = 10  # looks in a row a track must read as another colour than its name before it is renamed
 GRIP_REACH = 0.04  # m: when the jaws close on something, it is the track this close to the tool point
 STACK_REACH = 0.03  # m: let go this close above another track means put down on it
+PUT_DOWN_REACH = 0.06  # m: something new this close to where the jaws let go of something is what they put down
+PUT_DOWN_S = 60.0  # seconds that holds for: long enough for the arm to get out of the way
 
 
 def _apart(a, b) -> float:
@@ -93,6 +95,7 @@ class Watcher:
         self.maybe: list[dict] = []  # seen, not yet often enough to be a track
         self.numbers: dict[str, int] = {}
         self.arm_masks: deque = deque(maxlen=LAG_LOOKS)
+        self.put_down: list[dict] = []  # where and when the jaws let go of something that was never a track
         self.edge: list[dict] = []  # things across the edge of the searched area, and for how many looks each has lain still
         self.news: list[tuple[str, bool, list]] = []  # what moved in this look that the arm did not move, whether one look is proof, and the pixel
         self.by_arm = None  # the part of the picture where what happens is the arm's own doing
@@ -280,7 +283,10 @@ class Watcher:
         for j, d in enumerate(seen):
             if j in taken_d or d["cut"]:
                 continue
-            self._tell("something new is on the table", False, d["u"], d["v"])
+            # What the arm put down itself is new to the tracker when it was picked up without
+            # ever being a track (pick_at on something at the edge): not a hand's doing.
+            if not any(now - p["t"] < PUT_DOWN_S and _apart(d, p) < PUT_DOWN_REACH for p in self.put_down):
+                self._tell("something new is on the table", False, d["u"], d["v"])
             before = next((m for m in self.maybe if _px(m, d) < SAME_SPOT), None)
             d["looks"] = (before["looks"] if before else 0) + 1
             if d["looks"] < CONFIRM:
@@ -314,6 +320,9 @@ class Watcher:
             held.update(x=round(float(tcp[0]), 3), y=round(float(tcp[1]), 3), u=u, v=v, pixel=[round(u), round(v)], seen_t=now, moved_t=now)
         if not gripping and self.holding is not None:
             self.holding = None
+            self.put_down = [p for p in self.put_down if now - p["t"] < PUT_DOWN_S]
+            if not held and tcp is not None:
+                self.put_down.append({"x": float(tcp[0]), "y": float(tcp[1]), "t": now})
             if held:  # let go: on whatever is right underneath, else on the table, and out of sight under the gripper for now
                 held["recent"].clear()
                 base = min((t for t in self.tracks if t is not held and not t["on"] and _apart(t, held) < STACK_REACH), key=lambda t: _apart(t, held), default=None)

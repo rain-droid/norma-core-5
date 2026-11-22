@@ -39,3 +39,13 @@ something you did not mean to pick up, `place_at` a clear spot.
 
 Done when the arm is at `home` or `rest`, nothing is held by accident, and, if a person is
 needed, you have told them what and why.
+
+Seen on this arm (2026-11-22): moves were refused as blocked on joints 1, 2, 4 and 6 with
+nothing in the way; the same move again, slower, went through. `Arm.joints` now does that
+itself once, at half speed, and the result then carries `retried_blocked`. So a "blocked"
+error that reaches you has already failed twice: look before trying a third time. `rest` with
+the jaws open once left the fingertips pressed on the table, and `home` was then refused
+("gripper would hit the base", "fingertips into the table"); `rest` now brings the jaws
+together and folds at speed 0.3. If the arm is found like that anyway: `close_gripper`, then
+`joint_command` to the pose above the seat (`util/motion.py` `seat`) at 0.25 with
+`check: false`, then `rest`. The tests for this need no robot: `uv run --with pytest pytest -q tests`.

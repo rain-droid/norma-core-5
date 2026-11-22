@@ -17,6 +17,13 @@ Not fitted here: `base_in_mat`, where the robot's base sits on the mat (x, y in 
 rotation in degrees). It was set by hovering the gripper over an object located with this
 camera and correcting until it was centred; it stays as it is in the file.
 
+The fit belongs to one frame size (`image_size` in the file). When the tracker lists an object
+in the middle of the mat under `at_edge`, compare `image_size` with the frame: a fit made on
+640x480 frames is 106 px off in u on the 853x480 frames the daemon sends now. After writing a
+new fit, restart the tracker (track_objects stop, then read): it loads the file once. Tag 5
+(near corner, left in the image) sits half below the frame on 853x480, so it does not decode
+until the camera is tilted down a little.
+
 The far tags only decode with a short exposure, which is set on the robot side (in the
 repository that runs the daemon: scripts/camera_exposure.py 40, with the Station stopped).
 """

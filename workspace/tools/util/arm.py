@@ -14,7 +14,8 @@ What the robot side does with a command. It refuses it outside the calibrated jo
 outside the clearance envelope (fingertips into the table, arm into itself, tool behind the
 base), or while a servo reports a fault. Otherwise it travels through the waypoints in straight
 joint-space segments under one trapezoidal speed profile, trims out servo droop at the end,
-and stops with an error if a joint is blocked on the way. `check=False` skips the envelope;
+and stops with an error if a joint is blocked on the way (`Arm.joints` then tries once more
+at half speed before it gives up). `check=False` skips the envelope;
 `allow_low=True` lets the fingertips come down to the table surface. A gripper opening of 0 is
 a grasp: the jaws close until they stall and then hold just past that point.
 
@@ -32,6 +33,7 @@ import cv2
 import numpy as np
 
 DAEMON = os.environ.get("ELROBOT_DAEMON", "http://127.0.0.1:8765")
+BLOCKED_PAUSE_S = 0.5  # let the arm settle where it stopped before the slower second try
 
 
 class RobotError(Exception):
@@ -116,13 +118,16 @@ class Arm:
     # ---- commanding
 
     def joints(self, path=None, *, gripper: float | None = None, speed: float = 0.8, check: bool = True,
-               allow_low: bool = False, label: str = "") -> dict:  # fmt: skip
+               allow_low: bool = False, label: str = "", retry_blocked: bool = True) -> dict:  # fmt: skip
         """Send one joint command and wait for it to finish.
 
         path:    seven joint angles (rad), or a list of such waypoints travelled in one move.
         gripper: jaw opening 0..1, applied after the arm has arrived; 0 grasps.
         Returns the measured outcome: {"joints": [7 rad], "gripper": {open, width_mm, holding}, "tcp": {pos, quat, approach}}.
         Raises RobotError with the robot side's reason if it refuses or is blocked.
+        A move refused as blocked is sent once more at half speed first (`_again_slower`); the
+        result then carries `retried_blocked`, the first refusal. `retry_blocked=False` for a
+        move that is meant to stop on contact.
         """
         body: dict = {"source": self.source, "call_id": self.call_id, "label": label, "speed": speed, "check": check, "allow_low": allow_low}
         if path is not None:
@@ -130,14 +135,44 @@ class Arm:
             body["path"] = [[round(float(v), 5) for v in q] for q in (p[None] if p.ndim == 1 else p)]
         if gripper is not None:
             body["gripper"] = float(gripper)
+        res = self._send(body)
+        if not res["ok"] and retry_blocked and "path" in body and str(res["error"]).startswith("blocked"):
+            res = self._again_slower(body, res)
+        if not res["ok"]:
+            raise RobotError(res["error"])
+        return res
+
+    def _send(self, body: dict) -> dict:
         res = _request("/api/joints", body, timeout=300.0)
         self.sent += 1
         if self.log is not None:
             sent = {k: body[k] for k in ("label", "path", "gripper", "speed", "check", "allow_low") if k in body}
             with open(self.log, "a") as f:
                 f.write(json.dumps({"t": round(time.time(), 3), **sent, "outcome": "done" if res["ok"] else res["error"]}) + "\n")
-        if not res["ok"]:
-            raise RobotError(res["error"])
+        return res
+
+    def _again_slower(self, body: dict, refused: dict) -> dict:
+        """A move refused as blocked, sent once more at half the speed from where the arm stopped.
+
+        On this arm most "blocked" refusals are a joint trailing a fast setpoint with nothing in
+        the way, and the same move goes through slower. If something really is in the way the
+        slower move is refused as blocked too, and that second refusal is the one raised. Not
+        tried when the arm cannot be used (a servo fault, not connected) or when the tracker has
+        seen something come into the work area: then the first refusal stands.
+        """
+        try:
+            state = self.state()
+            if self.why_not_ready(state):
+                return refused
+            now = np.array([j["q"] for j in state["joints"][:7]])
+        except (RobotError, KeyError, IndexError, TypeError):
+            return refused
+        path = np.asarray(body["path"], dtype=float)
+        rest = path[int(np.argmin(np.linalg.norm(path - now, axis=1))):]  # the waypoints still ahead: not back to the start of the line
+        time.sleep(BLOCKED_PAUSE_S)
+        res = self._send({**body, "path": rest.tolist(), "speed": max(0.05, body["speed"] * 0.5), "label": (body["label"] + " (again, slower)").strip()})
+        if res["ok"]:
+            res["retried_blocked"] = refused["error"]
         return res
 
     def torque(self, enable: bool) -> None:

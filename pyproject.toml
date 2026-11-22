@@ -51,3 +51,6 @@ elrobot-agent = { path = ".", editable = true }
 sim = "elrobot up --sim --no-voice"
 up = "elrobot up --no-voice"
 test = "pytest -q"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]  # workspace/tests runs in the workspace's own interpreter: cd workspace && uv run --with pytest pytest -q tests
