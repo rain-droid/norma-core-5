@@ -2,6 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Where to read first
+
+| Question | File |
+|---|---|
+| What can it do, and how far is each part proven? | `docs/FEATURES.md` |
+| Why is it built this way? | `docs/DECISIONS.md` |
+| What are the contracts: tools, joint commands, files, frames, units? | `docs/INTERFACE.md` |
+| The daemon's HTTP and WebSocket API | `docs/API.md` |
+| How an agent should operate the arm | `workspace/AGENTS.md` and `workspace/skills/` |
+| Current state and next steps | `docs/HANDOFF.md` |
+
 ## What this is
 
 `elrobot-agent`: agent control for the ElRobot arm (7 revolute joints + gripper, Feetech ST3215 servos, IDs 1–8) on top of the NormaCore Station. An AI talks to the robot through a tool registry exposed over HTTP, MCP and a voice agent. `docs/HANDOFF.md` records the current state and next steps; `docs/API.md` is the daemon's HTTP/WebSocket contract (keep it in sync when changing the daemon).

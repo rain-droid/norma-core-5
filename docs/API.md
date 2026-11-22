@@ -1,5 +1,8 @@
 # Robot daemon API (v1)
 
+The daemon's HTTP and WebSocket contract. For the workspace tools an agent calls, the file formats and
+the frames and units, see `docs/INTERFACE.md`; for what works and how far it is proven, `docs/FEATURES.md`.
+
 One long-running process, the **daemon**, owns the robot. Everything else is a client:
 
 ```
