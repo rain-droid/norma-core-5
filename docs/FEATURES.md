@@ -18,6 +18,7 @@ Last updated 2026-11-22.
 | Safe mode: straight down, straight lines, refuse what is too far | `robot_config/motion.json` `safe_mode`, `tools/util/safe.py` | sim | On by default for the real arm, not yet run on it. Shrinks the working area to about 32 x 12 cm in front of the base |
 | Pick with wrist-camera checks | `pick_verified` | real (one cube, three runs) | Corrects the aim from the hover point, confirms the object is in the jaws |
 | Live tracking, pick and place by name | `track_objects`, `pick_object`, `place_object` | real with the old top camera; not re-run since the camera change | Names are colour plus a number (`blue-1`) |
+| Piles the arm did not build | `track_objects` (`on_source: "inferred"`) | sim | An object that vanishes while another changes colour, outline or height is taken to lie on it. Side by side and touching looks the same; plan and limits in `docs/OVERLAPPING_OBJECTS.md` |
 | Grasp planning among neighbours | `plan_grasp` | sim | Neighbours come from `find_objects`; the arm's own parts can show up there as grey objects |
 | Chess against a person | `chess_setup`, `chess_see`, `chess_move`, `chess_record` | sim | Needs squares of 30 mm or less; see "Known limits" |
 | Drawing with a pen | `draw_plan`, `draw_pen`, `draw_run` | sim | A person seats the pen with its tip on the paper |

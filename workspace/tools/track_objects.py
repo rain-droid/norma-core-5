@@ -6,6 +6,15 @@ whether it is `visible`, `hidden` behind the arm or a hand, `held` in the grippe
 how long it has been lying still (`still_s`), and what it has been put on (`on`). It starts the
 tracker if it is not running. Open `image` to see which outline has which name.
 
+`on_source` says how `on` is known. "placed": the arm put it there. "inferred": a person (or a
+push, or a fall) did, and the tracker concluded it: the object went missing without turning up
+anywhere, and the other one has looked different since (`on_evidence`: another colour, a larger
+outline, greater height, or the upper one standing in the lower one's place). The image marks
+such a pile "on blue-1?". Treat it as likely, not certain: two objects lying against each other
+look the same from above, so look closer (look_at_table, capture_camera) before relying on it.
+`z_mm` is how high the upper one lies, when the lower one's height had been measured; 0 if not.
+A pile that was already there when the tracker started is one object to it.
+
 Use these names with pick_object and place_object: they read the positions at the moment
 they act, so an object that has been moved since you looked is picked up where it is.
 

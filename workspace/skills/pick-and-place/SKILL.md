@@ -18,6 +18,12 @@ description: Pick up an object from the table and put it down somewhere else, or
 4. Look yourself before you report: `track_objects` again and open its image. For a stack the
    top object has `on` set to the one below. Expect a centimetre or two of error on the real
    arm. Report what you see, not what you commanded.
+   A stack the arm did not build (a person put one object on another) shows up the same way
+   with `on_source: "inferred"`: the tracker concluded it from one object vanishing while the
+   other changed its look. Before picking from or stacking on such a pile, look at it
+   (`look_at_table` over it, or the top image) and check that it is a pile and not two objects
+   side by side; if `z_mm` is 0 the lower one's height is unknown, so give `pick_at` the height
+   yourself.
 5. `rest` when the task is finished.
 
 When the tracker does not have the object (no outline, or it shares one with another object;

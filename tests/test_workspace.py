@@ -326,3 +326,44 @@ def test_a_stack_is_checked_and_an_object_that_fell_off_is_put_back(robot):
 
     # and it comes off again from on top, not from the table
     assert run("pick_object", object="red-1").get("holding") and world.held is blocks["red"]
+
+
+def tracks_when(condition, patience: float = 8.0) -> dict:
+    """The tracks by name, once `condition(tracks)` holds; the last ones read if it never does."""
+    deadline = time.time() + patience
+    while True:
+        tracks = {t["id"]: t for t in run("track_objects")["tracks"]}
+        if condition(tracks) or time.time() > deadline:
+            return tracks
+        time.sleep(0.2)
+
+
+def test_a_pile_nobody_told_the_tracker_about_is_concluded_from_what_it_saw(robot):
+    _, world = robot
+    blocks = arrange(world)
+    assert set(t["id"] for t in run("track_objects")["tracks"]) == {"red-1", "blue-1", "green-1"}
+    time.sleep(1.5)  # long enough for each to have been seen lying undisturbed
+
+    # a person puts the red block on the blue one: the arm has no part in it
+    blocks["red"].xy, blocks["red"].z = blocks["blue"].xy.copy(), blocks["blue"].height
+    tracks = tracks_when(lambda t: t["red-1"]["on"] or t["blue-1"]["on"])
+    assert set(tracks) == {"red-1", "blue-1", "green-1"}, "both keep their names, and the pile is not a new object"
+    assert tracks["red-1"]["on"] == "blue-1" and tracks["red-1"]["on_source"] == "inferred" and tracks["red-1"]["on_evidence"], tracks["red-1"]
+    assert tracks["blue-1"]["on"] is None and tracks["blue-1"]["state"] == "visible"
+    assert np.linalg.norm([tracks["red-1"]["x"] - tracks["blue-1"]["x"], tracks["red-1"]["y"] - tracks["blue-1"]["y"]]) < 1e-9
+    assert tracks["red-1"]["z_mm"] > 10, "and it is known to lie higher than the table"
+    assert tracks["green-1"]["on"] is None
+
+    # taken off again and put somewhere else: found by its colour, and the pile is no more
+    blocks["red"].xy, blocks["red"].z = np.array([0.14, 0.30]), 0.0
+    tracks = tracks_when(lambda t: t["red-1"]["on"] is None and t["red-1"]["state"] == "visible")
+    assert tracks["red-1"]["on"] is None and tracks["red-1"]["on_source"] is None, tracks["red-1"]
+    assert np.linalg.norm([tracks["red-1"]["x"], tracks["red-1"]["y"]] - blocks["red"].xy) < 0.01
+    assert set(tracks) == {"red-1", "blue-1", "green-1"}
+
+    # one that is simply taken away is missing, not on something
+    blocks["green"].xy = np.array([2.0, 2.0])
+    time.sleep(4.0)
+    tracks = {t["id"]: t for t in run("track_objects")["tracks"]}
+    assert tracks["green-1"]["state"] == "missing" and tracks["green-1"]["on"] is None, tracks["green-1"]
+    assert all(t["on"] is None for t in tracks.values())
