@@ -22,7 +22,7 @@ TABLE_Z = 0.010  # not zero, so a tool that forgets the table height shows
 @pytest.fixture(scope="module")
 def robot(tmp_path_factory):
     root = tmp_path_factory.mktemp("agent") / "workspace"
-    shutil.copytree(REPO_ROOT / "workspace", root, ignore=shutil.ignore_patterns("perception", "tool_call_history", "__pycache__", "assets", "*.sim.json", ".*"))
+    shutil.copytree(REPO_ROOT / "workspace", root, ignore=shutil.ignore_patterns("perception", "tool_call_history", "state", "__pycache__", "assets", "*.sim.json", ".*"))
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -98,6 +98,21 @@ def test_the_robot_side_refuses_and_a_broken_tool_says_so(robot):
     assert bug["error_kind"] == "tool_bug" and "IndexError" in bug["traceback"]
 
 
+def test_a_page_from_elsewhere_cannot_command_the_arm(robot):
+    import urllib.error
+    import urllib.request
+
+    def stop(origin: str) -> int:
+        req = urllib.request.Request(os.environ["ELROBOT_DAEMON"] + "/api/stop", data=b"{}", headers={"Origin": origin})
+        try:
+            return urllib.request.urlopen(req, timeout=5).status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    assert stop("https://example.com") == 403
+    assert stop("http://localhost:5173") == 200  # the web UI under `npm run dev`
+
+
 def test_top_camera_measures_at_a_height(robot):
     from util.capture import camera_from_homography
 
@@ -138,6 +153,18 @@ def test_workspace_plans_with_the_model_the_robot_side_checks_against():
     """The workspace carries its own copy of the robot model. If the two drifted apart, plans made
     here would be judged against a different arm."""
     assert (REPO_ROOT / "workspace/robot_config/model.urdf").read_bytes() == Config().urdf.read_bytes()
+
+
+def test_the_two_copies_of_kinematics_and_wrist_calibration_agree():
+    """Kinematics exists twice on purpose (the workspace plans with one, the robot side checks with
+    the other), and so does the wrist camera's calibration. A fix made in one copy only shows here."""
+
+    def code(path) -> str:  # everything after the module docstring, which differs
+        return (REPO_ROOT / path).read_text().split('"""', 2)[2]
+
+    assert code("src/elrobot/kinematics.py") == code("workspace/tools/util/kinematics.py")
+    ours, theirs = (json.loads((REPO_ROOT / p / "camera_wrist.json").read_text()) for p in ("data", "workspace/robot_config"))
+    assert {k: ours[k] for k in theirs} == theirs
 
 
 # ---- live tracking: positions that stay current, and what the tools do when the table changes

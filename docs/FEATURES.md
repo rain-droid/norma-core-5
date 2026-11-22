@@ -69,7 +69,8 @@ flowchart TD
 `blocked_retry_speed` is the one setting, in `workspace/robot_config/motion.json`: 0.5 (the default) is half as
 fast, 1 the same speed again, 0 no second try. It is read each time a move is blocked, so an edit needs no
 restart. Both tries are in the call's `joint_commands.jsonl`. A gripper-only command is not tried again, and a
-tool that means to stop on contact passes `retry_blocked=False`.
+tool that means to stop on contact passes `retry_blocked=False`; `draw_run` does for its strokes, where blocked
+means the pen presses too hard.
 
 ## How the pieces fit
 

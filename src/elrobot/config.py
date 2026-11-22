@@ -20,7 +20,7 @@ class Config:
     sim: bool = False
     voice: bool = True  # start the conversational agent with the daemon
     bus_serial: str | None = None
-    # camera unique-id substring -> name. The two cameras are the same model, so they can only be
+    # camera unique-id substring -> name. The two KD cameras are the same model, so they can only be
     # told apart by the USB port they are on; `scripts/probe.py` prints the ids.
     cameras: dict[str, str] = field(default_factory=dict)
 

@@ -96,7 +96,8 @@ on its behalf, but it only knows about the arm and the table, not about objects 
 - Measure with the `top` camera. It is calibrated against the mat; it hangs 79 cm above
   the mat, with the robot at the right edge of its image reaching towards the left: the robot's
   forward is image-left and its right is image-up. The `wrist` camera is for looking closely and
-  for checking a grasp; positions from it are centimetres off on the real arm.
+  for checking a grasp; positions from it are about 1 cm off within 25 cm of the base and 2 cm
+  or more beyond 30 cm on the real arm.
 - A pixel belongs to its capture. Give `pixel_to_table` the `image_id` it came from; pixel
   coordinates are those of the unmodified image, and `rgb_grid.jpg` has gridlines to read from.
 - Results are measurements, not verdicts. No error does not mean it worked: check the fields

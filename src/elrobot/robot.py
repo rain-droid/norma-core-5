@@ -40,6 +40,10 @@ class Stopped(RobotError):
     """The motion was interrupted by stop()."""
 
 
+class Blocked(RobotError):
+    """A joint trailed its setpoint for too long: something is in the way, or the move was too heavy or fast."""
+
+
 @dataclass
 class MoveResult:
     outcome: str  # "done" | "contact"
@@ -412,7 +416,7 @@ class Robot:
                 if now - lag_since > cfg.stall_time:
                     j = int(np.argmax(np.abs(lag))) + 1
                     await self._hold_here()
-                    raise RobotError(f"blocked: joint {j} is {math.degrees(abs(lag[j - 1])):.0f} deg behind where it should be. Something is in the way or the load is too heavy.")
+                    raise Blocked(f"blocked: joint {j} is {math.degrees(abs(lag[j - 1])):.0f} deg behind where it should be. Something is in the way or the load is too heavy.")
             else:
                 lag_since = None
             if t >= traj.duration:

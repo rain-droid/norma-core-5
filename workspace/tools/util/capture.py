@@ -6,7 +6,7 @@ its call's history folder with what is needed to read it, and is named by that f
 
 Two cameras, two models:
 
-* `top` is fixed, looking at the table from across it. Its calibration
+* `top` is fixed, above the mat, looking down at it. Its calibration
   (robot_config/camera_top.json, written by tools/calibrate_top.py) maps a pixel to the mat
   surface with a homography fitted to the four corner tags, and holds the camera's position,
   which extends that to points at a known height. This is the camera to measure with.

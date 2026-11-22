@@ -13,6 +13,8 @@ NormaCore Station (Rust, :8888 TCP)  <->  daemon (Python, :8765 HTTP + WS)
 ```
 
 - Base URL: `http://127.0.0.1:8765`
+- A request that is not a `GET` and carries an `Origin` header from another machine's page is answered `403`:
+  a web page open in a browser must not be able to move the arm. Clients that are not browsers send no `Origin`.
 - All bodies are JSON unless stated. All lengths are **metres**, all angles **radians**.
 - Robot base frame: origin on the table under the base, **x = right, y = forward, z = up**
   (seen from behind the robot). This is the URDF frame, unchanged.
@@ -39,7 +41,7 @@ Server pushes JSON text messages. The client never needs to send anything.
 }
 ```
 
-`events` is the backlog (most recent ~200 `event` messages, oldest first) so a page reload
+`events` is the backlog (most recent 300 `event` messages, oldest first) so a page reload
 restores the timeline.
 
 ### `state` (about 30 Hz)
@@ -141,7 +143,8 @@ The workspace's tools run in the agent's own shell. This is all they can ask of 
   waypoints of seven joint angles in radians, travelled as one move; `gripper` is applied after
   the arm arrives, and 0 closes until the jaws stall. Either may be left out. Blocks until done.
   Returns `{"ok": true, "joints": [7 measured], "gripper": {...}, "tcp": {...}}` or
-  `{"ok": false, "error": "...", "kind": "invalid" | "busy" | "robot" | "stopped"}`.
+  `{"ok": false, "error": "...", "kind": "invalid" | "busy" | "robot" | "blocked" | "stopped"}`.
+  `blocked` is a joint trailing its setpoint: the one refusal the workspace answers by sending the move once more, slower.
   Refused outside the calibrated joint limits, outside the clearance envelope unless
   `check` is false (`allow_low` lets the fingertips reach the table surface), and while any
   servo reports a fault. Shares the one-motion-at-a-time lock with `/api/tools`.

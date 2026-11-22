@@ -109,7 +109,7 @@ and its images. A capture's folder name is its `image_id`.
 - `path`: one or more waypoints, travelled in straight joint-space segments under one speed profile. Optional if `gripper` is given.
 - `gripper`: applied after the arm arrives. 0 is a grasp: the jaws close until they stall.
 - `check: false` skips the clearance envelope; `allow_low: true` lets the fingertips reach the table surface.
-- Returns `{"ok": true, "joints": [...], "gripper": {"open", "width_mm", "holding"}, "tcp": {"pos", "quat", "approach"}}`, or `{"ok": false, "error": "..."}` with the reason: outside limits, outside the envelope, blocked joint, servo fault.
+- Returns `{"ok": true, "joints": [...], "gripper": {"open", "width_mm", "holding"}, "tcp": {"pos", "quat", "approach"}}`, or `{"ok": false, "error": "...", "kind": "invalid" | "busy" | "robot" | "blocked" | "stopped"}` with the reason: outside limits, outside the envelope, blocked joint, servo fault.
 - The call returns when the motion has finished. `POST /api/stop` halts a motion; killing the caller does not.
 
 The daemon tries nothing twice. `Arm.joints` does, for one error: a move answered with `blocked: ...` is sent

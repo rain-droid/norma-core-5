@@ -17,6 +17,7 @@ import uuid
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -28,7 +29,7 @@ from .config import Config
 from .kinematics import Kinematics
 from .link import Link, SimLink, StationLink
 from .motion import interpolate_joint
-from .robot import Robot, RobotError, Stopped
+from .robot import Blocked, Robot, RobotError, Stopped
 from .skills import GESTURES, Skills
 from .workspace import Workspace, write_json
 
@@ -219,6 +220,8 @@ class Hub:
                     await (robot.grasp() if gripper <= 0.0 else robot.set_gripper(gripper, label=label))
             except Stopped:
                 return done("stopped before it finished; the arm is holding position", "stopped")
+            except Blocked as e:
+                return done(str(e), "blocked")  # the one refusal a caller may answer by trying again, slower
             except RobotError as e:
                 return done(str(e))
             finally:
@@ -317,6 +320,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     app = FastAPI(title="ElRobot daemon", lifespan=lifespan)
     app.state.hub = hub
+
+    @app.middleware("http")
+    async def local_pages_only(request: Request, call_next):
+        """A web page open in a browser on this machine can POST to 127.0.0.1 from any site, and
+        that would move the arm. Browsers name the page's site in `Origin`; anything but this
+        machine is turned away. Clients that are not browsers (the workspace, the MCP shim) send none."""
+        origin = request.headers.get("origin")
+        if request.method != "GET" and origin and urlsplit(origin).hostname not in ("127.0.0.1", "localhost", "::1", cfg.host):
+            return JSONResponse({"ok": False, "error": f"requests from {origin} are not accepted"}, status_code=403)
+        return await call_next(request)
 
     # The voice agent is optional: without its package the daemon still serves everything else.
     # Its routes must be registered before the catch-all static mount at "/" below.

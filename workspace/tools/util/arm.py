@@ -161,7 +161,7 @@ class Arm:
         if gripper is not None:
             body["gripper"] = float(gripper)
         res = self._send(body)
-        if not res["ok"] and retry_blocked and "path" in body and str(res["error"]).startswith("blocked"):
+        if not res["ok"] and retry_blocked and "path" in body and (res.get("kind") == "blocked" or str(res["error"]).startswith("blocked")):
             res = self._again_slower(body, res)
         if not res["ok"]:
             raise RobotError(res["error"])

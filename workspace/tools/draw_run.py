@@ -79,7 +79,9 @@ def draw_run(ctx, margin: float = 0.015, pen_up: float = 0.015, press: float = 0
             continue
         try:
             ctx.arm.joints(path[0], speed=0.6, allow_low=True, label=f"to stroke {i}")
-            ctx.arm.joints(path[1:], speed=speed, allow_low=True, label=f"stroke {i}")
+            # no slower second try on paper: a blocked stroke is the pen pressing too hard, and the
+            # second try starts at the nearest waypoint, which on a closed shape can be its end
+            ctx.arm.joints(path[1:], speed=speed, allow_low=True, label=f"stroke {i}", retry_blocked=False)
         except RobotError as e:
             raise RobotError(f"stopped during stroke {i} of {len(paths)}: {e}. Lift the pen clear (adjust_tcp, dz 0.03), "
                              f"see what happened, then continue with first_stroke {i}.") from None  # fmt: skip

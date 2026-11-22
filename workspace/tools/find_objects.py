@@ -23,8 +23,8 @@ it, and the outline is good to a pixel or two. Read several times, the numbers w
 `yaw_deg` is the jaw rotation for pick_at that closes the jaws across flat sides, and
 `width_mm` what they would close on (they open 53 mm). Heights are not measured.
 
-`camera: "wrist"` does the same from wherever the gripper is, with the wrist camera's rough
-model: useful up close, centimetres off on the real arm.
+`camera: "wrist"` does the same from wherever the gripper is, with the wrist camera's model:
+useful up close; on the real arm about 1 cm off within 25 cm of the base, 2 cm or more beyond 30 cm.
 
 Does not move the arm. Returns a new `image_id` and `annotated_image`: open it, and check that
 each outline is a real object and each cross sits in the middle of where the object stands.

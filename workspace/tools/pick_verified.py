@@ -150,11 +150,12 @@ def pick_verified(ctx, x: float, y: float, yaw_deg: float | None = 0.0, grasp_he
     arm.joints(gripper=1.0, label="opening")
     arm.joints(q_hover, speed=0.9, label="reaching")
 
-    moved, seen, before = [], None, None
+    moved, seen, before, colour = [], None, None, None  # colour: the object's, from the last look that found it
     for attempt in range(corrections + 1):
         seen = look(ctx, aim, object_height, plan.table_z)
         if seen is None:
             break
+        colour = seen["colour"]
         before = ctx.save_image("before.jpg", seen["marked"], "wrist view from the hover point: the object outlined, a cross where the jaws aim")
         off = seen["stands"] - aim[:2]
         if (abs(seen["lateral_mm"]) <= tolerance_mm and abs(seen["along_mm"]) <= tolerance_mm) or attempt == corrections:
@@ -186,8 +187,8 @@ def pick_verified(ctx, x: float, y: float, yaw_deg: float | None = 0.0, grasp_he
     time.sleep(0.3)
     holding = bool(arm.state()["gripper"]["holding"])
     out = {"holding": holding, "width_mm": grip["width_mm"], **report, "approach_pitch_deg": pitch, "tcp": tcp_report(res["tcp"], res["gripper"])}
-    if seen is not None:
-        fraction, marked = in_jaws(ctx.frame("wrist", settle=0.3), seen["colour"])
+    if colour is not None:
+        fraction, marked = in_jaws(ctx.frame("wrist", settle=0.3), colour)
         out["jaws_filled_fraction"] = round(fraction, 2)
         out["seen_in_jaws"] = bool(fraction > 0.25)
         out["after_image"] = ctx.save_image("after.jpg", marked, "wrist view after lifting: the object should fill the yellow box between the fingers")
