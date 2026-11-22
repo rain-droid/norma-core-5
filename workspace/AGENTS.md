@@ -41,6 +41,7 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Purpose | Tools | Moves the arm |
 |---|---|---|
 | See | `capture_camera`, `find_objects`, `read_proprioception`, `look_at_table` | only `look_at_table` |
+| Look at one object from the side: a pile, or two things touching? | `inspect_object` | yes |
 | Follow objects live | `track_objects` | no, but its motion heuristic slows the arm down |
 | Pixel to position | `pixel_to_table` | no |
 | The contract itself | `joint_command`, or `robot_config/control.py` from Python | yes |
@@ -69,6 +70,12 @@ stopped, and quiet does not mean nobody is there: the arm runs at full speed wit
 hand in view. Keep people clear of the arm.
 `pick_at` and `place_at` go
 to the numbers you give them and check nothing; use them for what the tracker cannot see.
+
+From above, objects lying on each other are one outline. The tracker concludes a pile it did
+not see being built from an object vanishing while another changes its look (`on` with
+`on_source: "inferred"`). That is a guess. Before picking from or stacking on such a pile, and
+whenever one outline looks like more than one thing, run `inspect_object`: the arm looks from
+the side with the wrist camera and tells the tracker what it found.
 
 ## The tools are a ladder, not a fence
 

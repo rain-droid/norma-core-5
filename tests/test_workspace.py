@@ -367,3 +367,43 @@ def test_a_pile_nobody_told_the_tracker_about_is_concluded_from_what_it_saw(robo
     tracks = {t["id"]: t for t in run("track_objects")["tracks"]}
     assert tracks["green-1"]["state"] == "missing" and tracks["green-1"]["on"] is None, tracks["green-1"]
     assert all(t["on"] is None for t in tracks.values())
+
+
+def test_a_look_from_the_side_settles_what_the_tracker_only_concluded(robot):
+    root, world = robot
+    blocks = arrange(world)
+    run("track_objects")
+    time.sleep(1.5)
+
+    # red put on blue by a person: concluded, then seen
+    blocks["red"].xy, blocks["red"].z = blocks["blue"].xy.copy(), blocks["blue"].height
+    assert tracks_when(lambda t: t["red-1"]["on"])["red-1"]["on_source"] == "inferred"
+    looked = run("inspect_object", object="red-1")
+    assert "error" not in looked, looked
+    assert looked["verdict"] == "pile" and looked["certain"] and looked["colours"] == ["red", "blue"], looked
+    assert all((root / v["marked"]).is_file() for v in looked["views"]) and len(looked["views"]) >= 2
+    assert looked["told_tracker"] == {"upper": "red-1", "lower": "blue-1", "verdict": "pile"}
+    tracks = tracks_when(lambda t: t["red-1"]["on_source"] == "seen")
+    assert tracks["red-1"]["on"] == "blue-1" and tracks["red-1"]["on_source"] == "seen", tracks["red-1"]
+
+    # green laid against blue: from above they are one outline, and one of the two tracks loses its place
+    blocks["red"].xy, blocks["red"].z = np.array([0.14, 0.30]), 0.0
+    tracks_when(lambda t: t["red-1"]["on"] is None and t["red-1"]["state"] == "visible")
+    time.sleep(1.5)
+    blocks["green"].xy = blocks["blue"].xy + [blocks["blue"].size[0] / 2 + blocks["green"].size[0] / 2, 0.0]
+    tracks = tracks_when(lambda t: sorted(o["state"] for k, o in t.items() if k != "red-1") == ["missing", "visible"] or t["green-1"]["on"] or t["blue-1"]["on"])
+    there = next(k for k in ("blue-1", "green-1") if tracks[k]["state"] == "visible" and not tracks[k]["on"])
+    gone = "green-1" if there == "blue-1" else "blue-1"
+    looked = run("inspect_object", object=there)
+    assert looked["verdict"] == "side_by_side" and sorted(looked["colours"]) == ["blue", "green"], looked
+    assert looked["told_tracker"] and looked["told_tracker"]["verdict"] == "side_by_side", looked
+    tracks = tracks_when(lambda t: t[gone]["beside"])
+    assert tracks[gone]["on"] is None and tracks[gone]["beside"] == there and tracks[gone]["state"] == "visible", tracks[gone]
+    time.sleep(2.0)
+    tracks = {t["id"]: t for t in run("track_objects")["tracks"]}
+    assert set(tracks) == {"red-1", "blue-1", "green-1"} and tracks[gone]["on"] is None and tracks[gone]["beside"] == there, "it stays that way: no pile, no new names"
+
+    # pulled apart again, each is found by itself
+    blocks["green"].xy = np.array([0.0, 0.28])
+    tracks = tracks_when(lambda t: all(o["state"] == "visible" and not o["beside"] for o in t.values()))
+    assert all(o["state"] == "visible" and o["beside"] is None and o["on"] is None for o in tracks.values()), tracks

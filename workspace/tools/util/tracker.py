@@ -20,6 +20,10 @@ saw it put there, but it went missing and has not turned up, and the other one l
 since (`on_evidence`: "colour", "area", "height", or "place" when the upper one now stands where
 the lower one stood). That is a conclusion (Watcher._piles): two objects laid against each other
 look the same from above. It is taken back when the lower one looks undisturbed again.
+tools/inspect_object.py goes and looks from the side with the wrist camera, and what it finds
+comes in through .runtime/tracker_notes.json (Watcher._told): a pile becomes "seen"; two
+objects lying against each other get `beside` (the id of the one the shared outline goes by)
+in place of `on`, and are not taken for a pile again.
 
 `intrusion` is set while something is moving on the table that the arm did not move: a thing
 coming in over the edge of the searched area, something new appearing, a tracked object
@@ -66,6 +70,7 @@ FILE = ROOT / "perception" / "exteroception" / "tracks.json"
 RUNTIME = ROOT / ".runtime"
 REACTION = RUNTIME / "tracker_on_intrusion"  # holds "stop" or "ignore" while someone has chosen that over the default
 REACTIONS = ("slow", "stop", "ignore")
+NOTES = RUNTIME / "tracker_notes.json"  # what a tool found out about a pile by looking from the side (tools/inspect_object.py)
 SLOW_PACE = 0.25  # fraction of its speed the arm keeps while something else moves on the table
 
 PERIOD = 0.1  # seconds between looks
@@ -178,6 +183,7 @@ class Watcher:
                 seen.append({**one[0], "cut": cut, "u": blob.centroid[0], "v": blob.centroid[1], "area_px": round(blob.area), "polygon": blob.polygon, "box": list(blob.box)})
 
         self._edge(across)
+        self._told(now)
         self._match(seen, near, [list(b.box) for b in across], now)
         self._gripper(gripping, tcp, now)
         self._intrusion(state, now, on_intrusion)
@@ -246,13 +252,14 @@ class Watcher:
 
     def _sighting(self, t: dict, d: dict, now: float, elsewhere: bool = False) -> None:
         t["misses"] = 0
+        t["beside"] = t["gone_from"] = None
         if d["cut"]:
             t["state"] = "hidden"
             return
         # Named for the colour it first showed. Two things touching are one outline with one
         # (mixed) colour, and one of them keeps the name when they part: so a name that has not
         # fitted for a second is replaced by one that does. What carries others reads as a mixture.
-        carrying = any(o["on"] == t["id"] for o in self.tracks)
+        carrying = any(t["id"] in (o["on"], o["beside"]) for o in self.tracks)
         t["odd"] = 0 if d["color"] == t["color"] else t["odd"] + 1
         t["misnamed"] = 0 if carrying else t["odd"]
         # Not while a track has just gone missing: the other colour may be that one lying on this
@@ -312,6 +319,44 @@ class Watcher:
             why.append("height")
         return why
 
+    def _told(self, now: float) -> None:
+        """Take in what a look from the side found (tools/inspect_object.py writes it, once):
+        {"upper": id, "lower": id, "verdict": "pile" | "side_by_side" | "alone"}. Of the two
+        tracks one has the place (it is what the outline is matched to), the other rides on it,
+        lies beside it or is missing. "alone" says the other one is not there."""
+        try:
+            note = json.loads(NOTES.read_text())
+            NOTES.unlink()
+        except (OSError, ValueError):
+            return
+        upper, lower = (next((t for t in self.tracks if t["id"] == note.get(k)), None) for k in ("upper", "lower"))
+        if upper is None or lower is None or upper is lower:
+            return
+        loose = lambda t: t["state"] in ("visible", "hidden") and not t["on"] and not t["beside"]  # noqa: E731
+        has = upper if loose(upper) and not loose(lower) else lower if loose(lower) and not loose(upper) else None
+        if has is None:
+            return  # both in plain view by themselves, or neither: the table is not as it was when the look was taken
+        other = lower if has is upper else upper
+        if note.get("verdict") == "pile":
+            if has is upper:  # the outline went by the upper one's name: the lower one gets the place
+                self._stands_on(upper, lower, now)
+            elif upper["on"] != lower["id"]:
+                upper.update(on=lower["id"], z_mm=(lower["calm"] or {}).get("height_mm") or lower["height_mm"] or 0)
+            upper.update(on_source="seen", on_evidence=None, beside=None, gone_from=None, doubt=0)
+        elif note.get("verdict") == "side_by_side":  # against it, not on it: still one outline from above
+            self._off(other)
+            other.update(beside=has["id"], gone_from=None)
+        elif note.get("verdict") == "alone":
+            self._off(other)
+            other.update(state="missing", misses=GONE_AFTER, beside=None, gone_from=has["id"])
+
+    def _stands_on(self, b: dict, under: dict, now: float) -> None:
+        """`b`, which has the place, stands on `under`, which has none: `under` takes the place over."""
+        keep = ("x", "y", "u", "v", "pixel", "polygon", "box", "seen_t", "area_px", "yaw_deg", "width_mm", "footprint_mm")
+        under.update({k: b[k] for k in keep}, state=b["state"], misses=0, moved_t=now, odd=0, misnamed=0, on=None, beside=None)
+        under["recent"].clear()
+        b.update(on=under["id"], z_mm=under["height_mm"] or 0, doubt=0)  # its own height, as last measured while it stood alone
+
     def _off(self, t: dict) -> None:
         t.update(on=None, on_source=None, on_evidence=None, z_mm=0, doubt=0)
 
@@ -335,16 +380,14 @@ class Watcher:
         if self.intrusion is not None:
             return  # a hand is still at it
         for b in self.tracks:
-            lost = [m for m in self._lost(now) if m is not b]
-            if not lost or b["state"] != "visible" or b["on"] or now - b["moved_t"] < PILE_STILL:
+            lost = [m for m in self._lost(now) if m is not b and m.get("gone_from") != b["id"]]  # not what a look from the side has ruled out
+            if not lost or b["state"] != "visible" or b["on"] or b["beside"] or now - b["moved_t"] < PILE_STILL:
                 continue
             under = next((m for m in lost if _px(m, b) < ON_ITS_PLACE and b["moved_t"] > m["seen_t"] - 1.0), None)
             if under:  # b came to stand where `under` stood
-                surface = under["height_mm"] or 0  # its own height, as last measured while it stood alone
-                keep = ("x", "y", "u", "v", "pixel", "polygon", "box", "seen_t", "area_px", "yaw_deg", "width_mm", "footprint_mm")
-                under.update({k: b[k] for k in keep}, state="visible", misses=0, moved_t=now, odd=0, misnamed=0)
-                under["recent"].clear()
-                b.update(on=under["id"], on_source="inferred", on_evidence=["place", *(w for w in self._changed(b) if w != "colour")], z_mm=surface, doubt=0)
+                evidence = ["place", *(w for w in self._changed(b) if w != "colour")]
+                self._stands_on(b, under, now)
+                b.update(on_source="inferred", on_evidence=evidence)
                 continue
             why = self._changed(b)
             if not why:
@@ -356,7 +399,7 @@ class Watcher:
 
     def _match(self, seen: list[dict], near, boxes: list, now: float) -> None:
         riders = {t["on"] for t in self.tracks if t["on"]}
-        loose = [t for t in self.tracks if t["state"] != "held" and not t["on"]]
+        loose = [t for t in self.tracks if t["state"] != "held" and not t["on"] and not t["beside"]]
         taken_t, taken_d = set(), set()
         for gap, i, j in sorted((_px(t, d), i, j) for i, t in enumerate(loose) for j, d in enumerate(seen)):
             t, d = loose[i], seen[j]
@@ -372,7 +415,7 @@ class Watcher:
             if j in taken_d or d["cut"]:
                 continue
             lost = [t for i, t in enumerate(loose) if i not in taken_t and t["color"] == d["color"]]
-            lost += [t for t in self.tracks if t["on"] and t["color"] == d["color"]]
+            lost += [t for t in self.tracks if (t["on"] or t["beside"]) and t["color"] == d["color"]]
             if lost:
                 t = min(lost, key=lambda t: _px(t, d))
                 taken_d.add(j)
@@ -400,19 +443,20 @@ class Watcher:
                 again.append(d)
                 continue
             t = {"height_mm": None, "on": None, "on_source": None, "on_evidence": None, "z_mm": 0, "moved_t": now, "moves": 0,
-                 "recent": deque(maxlen=25), "calm": None, "odd": 0, "doubt": 0, "reads": d["color"]}  # fmt: skip
+                 "recent": deque(maxlen=25), "calm": None, "odd": 0, "doubt": 0, "reads": d["color"], "beside": None, "gone_from": None}  # fmt: skip
             self._name(t, d["color"])
             self._sighting(t, d, now)
             self.tracks.append(t)
         self.maybe = again
         self._piles(now)
-        for t in self.tracks:  # what was put on something goes where that goes
-            base = next((b for b in self.tracks if b["id"] == t["on"]), None) if t["on"] else None
+        for t in self.tracks:  # what was put on something, or lies against it in one outline, goes where that goes
+            with_it = t["on"] or t["beside"]
+            base = next((b for b in self.tracks if b["id"] == with_it), None) if with_it else None
             if base:
                 t.update(x=base["x"], y=base["y"], u=base["u"], v=base["v"], pixel=base["pixel"], state=base["state"], seen_t=base["seen_t"], moved_t=max(t["moved_t"], base["moved_t"]))
-            elif t["on"]:
+            elif with_it:
                 self._off(t)
-                t["state"] = "missing"
+                t.update(state="missing", beside=None)
 
     def _gripper(self, gripping: bool, tcp, now: float) -> None:
         held = next((t for t in self.tracks if t["id"] == self.holding), None)
@@ -425,7 +469,7 @@ class Watcher:
             self.holding = held["id"] if held else ""
             if held:
                 self._off(held)
-                held["state"] = "held"
+                held.update(state="held", beside=None)
         if held and gripping:
             u, v = (float(c) for c in self.cam.to_pixel(tcp))
             held.update(x=round(float(tcp[0]), 3), y=round(float(tcp[1]), 3), u=u, v=v, pixel=[round(u), round(v)], seen_t=now, moved_t=now)
@@ -443,7 +487,7 @@ class Watcher:
     # ---- what goes out
 
     def _report(self, now: float) -> dict:
-        keys = ("id", "color", "state", "x", "y", "yaw_deg", "width_mm", "footprint_mm", "height_mm", "on", "on_source", "on_evidence", "z_mm", "moves", "pixel", "box", "area_px")
+        keys = ("id", "color", "state", "x", "y", "yaw_deg", "width_mm", "footprint_mm", "height_mm", "on", "on_source", "on_evidence", "beside", "z_mm", "moves", "pixel", "box", "area_px")
         tracks = [{**{k: t[k] for k in keys}, "still_s": round(now - t["moved_t"], 1), "seen_s": round(now - t["seen_t"], 1)} for t in self.tracks]
         lying = [e for e in self.edge if e["looks"] >= 10 and e["unseen"] < 3]
         return {
@@ -460,8 +504,8 @@ class Watcher:
 
     def _picture(self, img: np.ndarray) -> np.ndarray:
         colours = {"visible": (120, 255, 120), "hidden": (160, 160, 160), "held": (80, 220, 255), "missing": (90, 90, 255)}
-        marks = [{"label": f"{t['id']} {t['state']}" + (f" on {t['on']}{'?' if t['on_source'] == 'inferred' else ''}" if t["on"] else ""), "point": t["pixel"], "bgr": colours[t["state"]],
-                  "polygon": t["polygon"] if t["state"] == "visible" and not t["on"] else None} for t in self.tracks]  # fmt: skip
+        marks = [{"label": f"{t['id']} {t['state']}" + (f" on {t['on']}{'?' if t['on_source'] == 'inferred' else ''}" if t["on"] else f" beside {t['beside']}" if t["beside"] else ""), "point": t["pixel"], "bgr": colours[t["state"]],
+                  "polygon": t["polygon"] if t["state"] == "visible" and not t["on"] and not t["beside"] else None} for t in self.tracks]  # fmt: skip
         marks += [{"label": "at the edge: not tracked" if e["looks"] >= 10 else "", "box": e["box"], "bgr": (0, 160, 255) if e["looks"] >= 10 else (0, 0, 255)} for e in self.edge if not e["unseen"]]
         if self.intrusion:
             img = img.copy()

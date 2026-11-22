@@ -5,6 +5,19 @@ today is in `docs/FEATURES.md`. Add an entry with each push.
 
 ## 2026-11-22
 
+### `inspect_object`: the arm looks from the side where the top camera cannot tell
+Modified by: Arian Malekzadeh
+
+- New tool `workspace/tools/inspect_object.py`. Given a tracked name or a spot, the arm brings the wrist camera
+  about 20 cm from it, looking down at a slant, from up to three sides. Each view is split by colour; colours
+  one above the other in every view are a pile, colours next to each other are two objects touching.
+- The verdict goes to the tracker through `.runtime/tracker_notes.json`: a pile becomes `on_source: "seen"`;
+  side by side, the object without an outline of its own gets `beside` and is no longer `on`; a pile that is
+  not there is dissolved. This also works for an object the tracker had simply lost.
+- Only colours that every view shows at the spot count, so an object standing behind it does not.
+- Test in `tests/test_workspace.py`, simulator only. On the real arm the viewpoints, the real camera's mounting
+  and the colour reading are all untried.
+
 ### Tracker concludes piles it did not see being built
 Modified by: Arian Malekzadeh
 

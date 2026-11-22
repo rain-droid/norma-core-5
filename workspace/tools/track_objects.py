@@ -11,7 +11,9 @@ push, or a fall) did, and the tracker concluded it: the object went missing with
 anywhere, and the other one has looked different since (`on_evidence`: another colour, a larger
 outline, greater height, or the upper one standing in the lower one's place). The image marks
 such a pile "on blue-1?". Treat it as likely, not certain: two objects lying against each other
-look the same from above, so look closer (look_at_table, capture_camera) before relying on it.
+look the same from above, so run inspect_object before relying on it: it looks from the side
+with the wrist camera. After that `on_source` is "seen", or the object has `beside` (the name of
+the one it lies against, in one outline with it) and no `on`.
 `z_mm` is how high the upper one lies, when the lower one's height had been measured; 0 if not.
 A pile that was already there when the tracker started is one object to it.
 

@@ -20,10 +20,11 @@ description: Pick up an object from the table and put it down somewhere else, or
    arm. Report what you see, not what you commanded.
    A stack the arm did not build (a person put one object on another) shows up the same way
    with `on_source: "inferred"`: the tracker concluded it from one object vanishing while the
-   other changed its look. Before picking from or stacking on such a pile, look at it
-   (`look_at_table` over it, or the top image) and check that it is a pile and not two objects
-   side by side; if `z_mm` is 0 the lower one's height is unknown, so give `pick_at` the height
-   yourself.
+   other changed its look. Before picking from or stacking on such a pile, run
+   `inspect_object` on it: the arm looks at it from the side with the wrist camera and says
+   "pile", "side_by_side" or "one_colour", and the tracker takes that over (`on_source: "seen"`,
+   or `beside` instead of `on`). Open its images when it is not `certain`. If `z_mm` is 0 the
+   lower one's height is unknown, so give `pick_at` the height yourself.
 5. `rest` when the task is finished.
 
 When the tracker does not have the object (no outline, or it shares one with another object;

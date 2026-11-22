@@ -108,13 +108,24 @@ Limits:
 - Same-coloured layers do not separate into bands. The image is still returned, and the agent judges it.
 - Black objects and ones the colour of the mat are not seen by the segmentation.
 
+Built on 2026-11-22, simulator only. What came out differently from the plan above:
+
+- The camera, not the tool point, is placed on the line of sight (the camera sits beside the tool axis), about
+  20 cm from the spot at 35 degrees, from the robot's side and from 40 degrees left and right of it, further
+  round if those are out of reach. Between views the arm goes by way of the ready pose.
+- Not bands from bottom to top, but the outline split by colour and the colours' positions compared: above
+  each other is a pile, next to each other is two objects. A pile is `certain` with two agreeing views.
+- An object standing behind the spot gets into one view's outline: only colours seen in every view count.
+- "Side by side" is kept in the tracker as `beside`, so the pair is not concluded to be a pile again.
+
 Steps:
 
-- [ ] `tools/inspect_object.py`: the viewing pose and the capture.
-- [ ] The layer count in the wrist image.
-- [ ] `tracker_notes.json`, read by the tracker: confirm or dissolve a pile.
-- [ ] Test in the simulator, then on the real arm with two cubes of different colours.
-- [ ] `workspace/AGENTS.md`, skill, `docs/FEATURES.md`, `docs/CHANGELOG.md`.
+- [x] `tools/inspect_object.py`: the viewing pose and the capture.
+- [x] The layer count in the wrist image.
+- [x] `tracker_notes.json`, read by the tracker: confirm or dissolve a pile.
+- [x] Test in the simulator.
+- [ ] Test on the real arm with two cubes of different colours.
+- [x] `workspace/AGENTS.md`, skill, `docs/FEATURES.md`, `docs/CHANGELOG.md`.
 
 ## Order
 
