@@ -21,7 +21,7 @@ the envelope;
 a grasp: the jaws close until they stall and then hold just past that point.
 
 The call returns when the motion has finished. Killing the calling process does not stop a
-motion already sent: `Arm.stop()` (tools/stop.py) does.
+motion already sent: `Arm.stop()` (tools/stop.py) does. `Arm.pace()` slows one down for a moment.
 """
 
 import json
@@ -222,6 +222,11 @@ class Arm:
     def stop(self) -> None:
         """Halt any motion now and hold position. Always allowed."""
         _request("/api/stop", {})
+
+    def pace(self, scale: float, hold_s: float = 0.5) -> None:
+        """Run motions at `scale` (0.05..1) of their planned speed for the next `hold_s` seconds.
+        It wears off by itself: keep calling to keep the arm slow."""
+        _request("/api/pace", {"scale": scale, "hold_s": hold_s}, timeout=2.0)
 
     def emit(self, kind: str, **fields) -> None:
         """Show something in the web UI (timeline entries, markers, detections). Display only."""

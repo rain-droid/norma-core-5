@@ -6,7 +6,8 @@ description: What to do when a command is refused, the arm is blocked, a servo f
 Read the error first: each one is written to be acted on. Then, by what it says:
 
 - **busy**: another motion is running. Wait for it, or `stop` it.
-- **stopped**: someone pressed stop, or the tracker detected unexplained motion.
+- **stopped**: someone pressed stop, or a tracker set to stop (`on_intrusion: "stop"`; by
+  default it only slows the arm) detected unexplained motion.
   `perception/exteroception/intrusion.jpg` circles the last alarm's trigger;
   `intrusion.json` beside it records the report at that moment. These are historical:
   inspect the current scene with `track_objects` and `capture_camera` before deciding.

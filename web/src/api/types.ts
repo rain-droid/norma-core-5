@@ -145,6 +145,31 @@ export interface Detection {
   polygon?: [number, number][];
 }
 
+/** A line drawn over a camera picture: the robot's frame, its reach, the arm as the kinematics see it. */
+export interface VisionLine {
+  label: string;
+  color: 'x' | 'y' | 'reach' | 'arm';
+  points: [number, number][];
+  arrow?: boolean;
+  joints?: boolean;
+}
+
+/** What the daemon's vision sees in one camera frame (`GET /api/camera/{name}/vision`). */
+export interface VisionFrame {
+  camera: string;
+  width: number;
+  height: number;
+  seq: number;
+  /** How long the analysis took on the daemon. */
+  ms: number;
+  layers: {
+    objects?: Detection[];
+    tags?: { label: string; polygon: [number, number][] }[];
+    frame?: VisionLine[];
+    arm?: VisionLine[];
+  };
+}
+
 export interface DetectionsEvent extends EventBase {
   kind: 'detections';
   camera: string;

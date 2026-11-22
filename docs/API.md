@@ -55,6 +55,7 @@ restores the timeline.
   "calibrated": true,
   "torque": true,
   "busy": false,
+  "pace": 1.0,
   "activity": "idle",
   "source": null,
   "joints": [
@@ -109,6 +110,11 @@ and a `kind`. Kinds:
 
 - `GET /api/camera/{name}/frame.jpg` → latest JPEG (`404` if no frame yet).
 - `GET /api/camera/{name}/stream.mjpg` → `multipart/x-mixed-replace` MJPEG stream.
+- `GET /api/camera/{name}/vision` → what the vision sees in the newest frame, for the web UI's camera panel
+  (`src/elrobot/vision_live.py`): `{camera, width, height, seq, ms, layers}`. `layers.objects` are segmented
+  outlines (`label` a colour word, `polygon`, `box`, `point`), `layers.tags` AprilTags; for `top`, when its
+  calibration matches the frame size, also `layers.frame` (base axes and reach limits) and `layers.arm` (the arm as
+  the kinematics place it). Computed on request and cached per frame; display only. `404` if no frame yet.
 
 ### Tools
 
@@ -118,6 +124,11 @@ and a `kind`. Kinds:
   Tool names and JSON schemas come from `hello.tools`. A second motion tool called while one
   is running returns `ok: false` with `error: "busy"`.
 - `POST /api/stop` → immediately halts motion and holds position. Always allowed. `{"ok": true}`.
+- `POST /api/pace` with `{"scale": 0.25, "hold_s": 0.5}` → motions run at that fraction (0.05 to 1) of
+  their planned speed for the next `hold_s` seconds (at most 5), then return to full speed by
+  themselves. A motion under way changes speed smoothly along its path; to keep the arm slow,
+  keep posting. `state.pace` is the fraction in force. The workspace's tracker posts this while
+  something moves on the table. `{"ok": true, "pace": 0.25}`.
 - `POST /api/torque` with `{"enable": false}` → release (arm goes limp) or re-enable torque.
 
 Tools the UI calls directly (stable names): `home`, `rest`, `stop`, `gesture` (`{"name": "wave"}`),

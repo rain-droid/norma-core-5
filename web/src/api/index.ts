@@ -46,5 +46,6 @@ export const api = {
   chat: (text: string) => active().chat(text),
   utterance: (audio: Blob) => active().utterance(audio),
   camera: (name: string) => active().camera(name),
+  vision: (name: string) => active().vision(name),
   retryNow: () => active().retryNow(),
 };

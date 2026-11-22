@@ -15,16 +15,18 @@ tracks.jpg beside it is the view. util/tracker.py is the process that writes the
 `intrusion` is set while something is moving on the table that the arm did not move: a thing
 coming in over the edge of the work area, something new appearing, a tracked object sliding.
 From this camera that is what a hand looks like. `clear_s` says how long the table has been
-quiet. While it is not quiet the tracker stops any motion of the arm; pick_object and
-place_object wait and carry on, other tools return a "stopped" error. A thing lying still is
+quiet. While it is not quiet the tracker slows any motion of the arm to a quarter of its speed,
+and lets it return to full speed when the table is quiet again. A thing lying still is
 never an intrusion: a motionless hand is not seen as one. This is not a person detector or
 safety interlock; keep people out of the arm's reach while it runs.
 For the last alarm, open perception/exteroception/intrusion.jpg (trigger circled) and
 intrusion.json beside it (the report at that moment). These are historical evidence, not
 the current scene; use tracks.jpg and tracks.json for that.
-`stop_arm_on_intrusion: false` restarts the tracker without the stopping. Only do this after
-an operator has checked the scene and agreed to supervise without it; do not disable it
-automatically to get past repeated stops. It stays off until explicitly set to true.
+`on_intrusion` restarts the tracker with another reaction, and it stays that way until set
+again: "slow" (the default), "stop" (the motion is halted; pick_object and place_object wait
+for quiet and carry on, other tools return a "stopped" error), or "ignore" (nothing). Only use
+"ignore" after an operator has checked the scene and agreed to supervise without it; do not
+choose it automatically to get past repeated alarms.
 
 `at_edge` lists things lying across the edge of the searched area. They cannot be measured
 there or picked by name: move them in, or use capture_camera and pixel_to_table.
@@ -41,16 +43,18 @@ from util import tracker
 from util.arm import RobotError
 
 
-def track_objects(ctx, action: str = "read", stop_arm_on_intrusion: bool | None = None) -> dict:
+def track_objects(ctx, action: str = "read", on_intrusion: str | None = None) -> dict:
     if action == "stop":
         return {"tracking": False, "was_running": tracker.stop()}
     if action != "read":
         raise RobotError(f"action is 'read' or 'stop', not '{action}'")
     now = tracker.read()
-    if stop_arm_on_intrusion is not None:
+    if on_intrusion is not None:
+        if on_intrusion not in tracker.REACTIONS:
+            raise RobotError(f"on_intrusion is one of {', '.join(tracker.REACTIONS)}")
         tracker.RUNTIME.mkdir(exist_ok=True)
-        (tracker.NO_STOP.unlink(missing_ok=True) if stop_arm_on_intrusion else tracker.NO_STOP.touch())
-        if now and now["stops_arm_on_intrusion"] != stop_arm_on_intrusion:
+        (tracker.REACTION.unlink(missing_ok=True) if on_intrusion == "slow" else tracker.REACTION.write_text(on_intrusion))
+        if now and now["on_intrusion"] != on_intrusion:
             tracker.stop()
     data = tracker.start()
     view = cv2.imread(str(tracker.FILE.with_suffix(".jpg")))
@@ -59,7 +63,7 @@ def track_objects(ctx, action: str = "read", stop_arm_on_intrusion: bool | None 
         "image": ctx.save_image("tracks.jpg", view, "top view: each tracked object outlined and named") if view is not None else None,
         "clear_s": data["clear_s"],
         "intrusion": data["intrusion"],
-        "stops_arm_on_intrusion": data["stops_arm_on_intrusion"],
+        "on_intrusion": data["on_intrusion"],
         "holding": data["holding"],
         "tracks": [{k: v for k, v in t.items() if k not in ("pixel", "box", "area_px")} for t in data["tracks"]],
         "at_edge": data["at_edge"],

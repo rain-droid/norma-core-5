@@ -41,7 +41,7 @@ nothing. If the robot daemon is not running the error says how to start it.
 | Purpose | Tools | Moves the arm |
 |---|---|---|
 | See | `capture_camera`, `find_objects`, `read_proprioception`, `look_at_table` | only `look_at_table` |
-| Follow objects live | `track_objects` | no, but its motion heuristic can stop the arm |
+| Follow objects live | `track_objects` | no, but its motion heuristic slows the arm down |
 | Pixel to position | `pixel_to_table` | no |
 | The contract itself | `joint_command`, or `robot_config/control.py` from Python | yes |
 | Move the tool point | `move_tcp`, `adjust_tcp` | yes |
@@ -61,9 +61,11 @@ name, look again to confirm, and `rest` when you are done or waiting. Do not lea
 stretched out: holding that is hard on the shoulder servo.
 
 `pick_object` and `place_object` read the tracker while they move: they aim again when the
-object has been moved, wait when unexplained motion is detected, try again when a grasp comes up
-empty, and check with the camera where a placed object ended up. Quiet does not mean nobody
-is there: these tools may resume with a stationary hand in view. Keep people clear of the arm.
+object has been moved, try again when a grasp comes up empty, and check with the camera where
+a placed object ended up. While something else moves on the table the tracker slows the arm to
+a quarter of its speed, and lets it return to full speed once the table is quiet. Slow is not
+stopped, and quiet does not mean nobody is there: the arm runs at full speed with a stationary
+hand in view. Keep people clear of the arm.
 `pick_at` and `place_at` go
 to the numbers you give them and check nothing; use them for what the tracker cannot see.
 
@@ -107,10 +109,11 @@ on its behalf, but it only knows about the arm and the table, not about objects 
 - `check: false` and `allow_low: true` remove or loosen the robot side's clearance guard. Use
   them deliberately, with small steps, after `read_proprioception`.
 - If something looks wrong or a person reaches in, `tools/stop.py` first, think second.
-  The tracker can stop on unexplained motion, but is not a person detector or safety
+  The tracker slows the arm on unexplained motion (or stops it, with `track_objects`
+  `on_intrusion: "stop"`), but is not a person detector or safety
   interlock. Stationary hands, occluded areas, table-coloured objects and regions outside
   the top camera's search area can be missed. Its last alarm is recorded in
   `perception/exteroception/intrusion.jpg` and `intrusion.json`; those are historical,
-  not live views. Never disable stopping automatically to work around repeated alarms.
+  not live views. Never set `on_intrusion: "ignore"` automatically to work around repeated alarms.
 - When you learn something about this arm or this table that the next session should know,
   write it into the relevant skill or tool docstring.

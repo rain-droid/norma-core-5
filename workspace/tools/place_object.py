@@ -6,10 +6,11 @@ table; `z` if the surface there is higher than the table). The motion is place_a
 lower in a straight line, open the jaws 22 mm above the surface, back out along the same line.
 What this adds:
 
-* it waits until the table is quiet, and aims at where `on` is then;
+* it waits until `on` is in view and lying still, and aims at where it is then;
 * at the hover point it asks whether `on` has been moved since, and aims again if so;
-* if the tracker stops the arm because something moved on the table (a hand, most likely), it
-  waits for quiet and carries on;
+* while something moves on the table that the arm did not move (a hand, most likely), the
+  tracker slows the arm down and it carries on; under a tracker set to stop instead, it waits
+  for quiet and carries on;
 * afterwards it waits for the top camera to see the object again (sending the arm home if the
   arm is in the way) and compares. On the table, it must lie within 40 mm of x, y. On another
   object, it must not be lying anywhere else, and the pile must look taller or bigger than

@@ -6,6 +6,16 @@ from commit messages, `CLAUDE.md` and `workspace/AGENTS.md`, not witnessed.
 
 ## 2026-11-22
 
+**The web UI's live vision is worked out by the daemon, on request, and is for display only.** The camera
+panel asks `GET /api/camera/{name}/vision` a few times a second while a live layer is switched on; nothing is
+computed when nobody is looking, and the result is cached per frame. It draws object outlines, AprilTags, the
+robot's frame and reach, and the arm as the kinematics place it. It deliberately does not feed the tools: they
+keep their own, slower and more careful measurements (`find_objects`, the tracker). The "Arm" layer is the
+quickest check that calibration still holds: the line should lie on the real arm.
+
+**The camera panel shows every camera, not only the wrist.** It opens on `top`, which sees the whole table;
+the choice and the layers are remembered in the browser, and `?camera=...&layers=...` in the address sets them.
+
 **A move stopped as blocked is sent once more, slower, by the workspace, not by the daemon.** Most "blocked"
 stops on this arm are a joint trailing a fast setpoint under load with nothing in the way, and the same move
 slower goes through (seen on joints 1, 2, 4 and 6, and on `home` from rest above speed 0.5). It lives in `Arm.joints` (`util/arm.py`), which
@@ -92,4 +102,4 @@ proportional mapping NormaCore's viewer uses.
 
 **Angles in tool arguments carry their unit** (`yaw_deg`, `pitch_deg`); everything else is metres and radians.
 
-**The tracker's intrusion stop is a motion heuristic, not a safety interlock.** It is never to be disabled automatically.
+**The tracker's reaction to an intrusion is a motion heuristic, not a safety interlock.** By default it slows the arm to a quarter of its speed while something else moves on the table and lets it return to full speed afterwards (the operator's choice, 2026-11-22: a stop for every hand at the edge of the mat made tasks fail); `on_intrusion: "stop"` halts it as before. It is never to be switched to `ignore` automatically.

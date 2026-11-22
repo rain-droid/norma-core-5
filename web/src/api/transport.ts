@@ -1,4 +1,4 @@
-import type { ChatResult, ServerMessage, ToolResult, UtteranceResult } from './types.ts';
+import type { ChatResult, ServerMessage, ToolResult, UtteranceResult, VisionFrame } from './types.ts';
 
 export interface TransportHandlers {
   onMessage(msg: ServerMessage): void;
@@ -29,4 +29,6 @@ export interface Transport {
   chat(text: string): Promise<ChatResult>;
   utterance(audio: Blob): Promise<UtteranceResult>;
   camera(name: string): CameraSource;
+  /** Live vision layers for a camera's newest frame; null when the daemon has none to give. */
+  vision(name: string): Promise<VisionFrame | null>;
 }

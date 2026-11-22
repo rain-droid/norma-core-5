@@ -127,7 +127,8 @@ not, the second error is raised. `retry_blocked=False` on a call switches it off
 
 Reads: `GET /api/state` (`connected`, `calibrated`, `torque`, `joints[]` with `q`, `lower`, `upper`, `load`,
 `temp`, `error`; `gripper`; `ee`; `cameras[]` with `name`, `width`, `height`, `age_ms`), `GET /api/meta`
-(`mode` real or sim, `table_z`, `clearance`), `GET /api/camera/{name}/frame.jpg`. Also `POST /api/torque`,
+(`mode` real or sim, `table_z`, `clearance`), `GET /api/camera/{name}/frame.jpg`, `GET /api/camera/{name}/vision` (what the vision sees in that frame, for
+the web UI only). Also `POST /api/torque`,
 `POST /api/event` (display only).
 
 ## Cameras
@@ -201,7 +202,7 @@ Signatures as of 2026-11-22; `--schema` on a tool is always current.
 | `read_proprioception` | - | Report the measured robot state and draw the body's current posture. |
 | `rest` | - | Fold the arm into its resting seat and switch the motors off. |
 | `stop` | - | Halt all motion now and hold position. Always allowed, even while another tool is running. |
-| `track_objects` | `action: str = 'read', stop_arm_on_intrusion: bool \| None = None` | Live tracking of what is on the table: read it, and start or stop it. |
+| `track_objects` | `action: str = 'read', on_intrusion: str \| None = None` | Live tracking of what is on the table: read it, and start or stop it. |
 
 ## Testing without a robot
 

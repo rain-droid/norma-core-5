@@ -19,6 +19,7 @@ Last updated 2026-11-22.
 | Chess against a person | `chess_setup`, `chess_see`, `chess_move`, `chess_record` | sim | Needs squares of 30 mm or less; see "Known limits" |
 | Drawing with a pen | `draw_plan`, `draw_pen`, `draw_run` | sim | A person seats the pen with its tip on the paper |
 | Skills | `activate_skill`, `deactivate_skill` | real | `skills/*/SKILL.md`: pick-and-place, recover, direct-joint-control, play-chess, draw |
+| Camera panel: switch feeds, live vision layers | web UI, `GET /api/camera/{name}/vision` | sim (UI checked against the simulator) | Tabs for every camera; toggles for Objects, Tags, Frame, Arm, Tools. `?camera=top&layers=objects,frame,arm` opens it that way |
 | Web UI, MCP server, voice agent | `web/`, `src/elrobot/mcp_server.py`, `src/elrobot/voice/` | built by teammates; not exercised in the 2026-11-22 sessions | See `CLAUDE.md` and `docs/API.md` |
 
 ## A verified pick, in pictures

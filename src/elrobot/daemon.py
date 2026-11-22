@@ -389,6 +389,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
         return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame", headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/camera/{name}/vision")
+    async def camera_vision(name: str):
+        """What the vision sees in that camera's newest frame, for the web UI to draw (vision_live.py)."""
+        from . import vision_live
+
+        out = await asyncio.to_thread(vision_live.analyse, hub, name)
+        if out is None:
+            raise HTTPException(404, f"no frame from camera '{name}'")
+        return out
+
     @app.post("/api/tools/{name}")
     async def run_tool(name: str, request: Request):
         try:
@@ -421,6 +431,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     async def stop():
         await hub.stop()
         return {"ok": True}
+
+    @app.post("/api/pace")
+    async def pace(request: Request):
+        """Slow motions down for a moment (docs/API.md). Never speeds one up beyond what it was sent with."""
+        body = await request.json()
+        try:
+            scale = hub.robot.set_pace(body["scale"], body.get("hold_s", 0.5))
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, 'body must be {"scale": 0.05..1, "hold_s": seconds}') from None
+        return {"ok": True, "pace": scale}
 
     @app.post("/api/torque")
     async def torque(request: Request):

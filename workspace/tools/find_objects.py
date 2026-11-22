@@ -46,6 +46,8 @@ SEARCH_X = (-0.24, 0.24)
 SEARCH_Y = (0.14, 0.40)
 # How far from the table's colour a pixel must be to belong to an object (Lab units, 0..255).
 COLOUR_STEP, LIGHTER_STEP, DARKER_STEP = 14.0, 30.0, 70.0
+LOCAL_PX = 101  # window for the table's local brightness, pixels (about 15 cm): much wider than an object
+LOCAL_SCALE, LOCAL_MIN = 8, 20  # it is computed on an image this many times smaller; fewer table pixels than this in a window and the overall median stands in
 
 
 def color_name(img: np.ndarray, blob: vision.Blob) -> str:
@@ -69,11 +71,27 @@ def color_name(img: np.ndarray, blob: vision.Blob) -> str:
 def stands_out(img: np.ndarray, valid: np.ndarray) -> np.ndarray:
     """Pixels that are not table, by the top camera. The table is the median colour of the
     search area. A pixel counts if its colour differs (not just its brightness), or if it is
-    clearly lighter, or very much darker. Merely darker is a shadow: the arm throws one right
-    where it works, and a shadow has the table's colour."""
+    clearly lighter than the table around it, or very much darker. Merely darker is a shadow:
+    the arm throws one right where it works, and a shadow has the table's colour."""
     lab = cv2.cvtColor(cv2.GaussianBlur(img, (5, 5), 0), cv2.COLOR_BGR2LAB).astype(np.float32)
     table = np.median(lab[valid], axis=0)
-    lighter = lab[..., 0] - table[0]
+    # Lighter than the table around it, not than the table as a whole: the lamp lights one part
+    # of a pale table 25 to 30 units above its median, and that patch came and went as an object
+    # ("white-1 is being moved") whenever the arm's shadow or the exposure shifted. The local
+    # level is only ever raised above the median, so that lit table beside a shadow stays table.
+    # The median is taken over table pixels only. Filling what the arm covers and what lies
+    # outside the search area with the overall median made the local level fall back to it
+    # wherever those fill more than half the window: next to the arm and along the edges,
+    # which is where the lit patch then came back as "grey-N is being moved".
+    small = cv2.resize(np.where(valid, lab[..., 0], np.nan), None, fx=1 / LOCAL_SCALE, fy=1 / LOCAL_SCALE, interpolation=cv2.INTER_NEAREST)
+    half = LOCAL_PX // LOCAL_SCALE // 2
+    windows = np.lib.stride_tricks.sliding_window_view(np.pad(small, half, constant_values=np.nan), (2 * half + 1, 2 * half + 1))
+    windows = windows.reshape(*small.shape, -1)
+    enough = np.isfinite(windows).sum(axis=-1) >= LOCAL_MIN
+    local = np.full(small.shape, table[0], np.float32)
+    local[enough] = np.nanmedian(windows[enough], axis=-1)
+    local = cv2.resize(local, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
+    lighter = lab[..., 0] - np.maximum(local, table[0])
     colour = np.hypot(lab[..., 1] - table[1], lab[..., 2] - table[2])
     # dark only counts in the bulk: the black line where an object meets the table is shadow too,
     # and would move its base towards the camera

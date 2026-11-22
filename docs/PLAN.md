@@ -84,6 +84,7 @@ remains" first, then drawing on real paper (requirement 1 still holds with sort 
 - [x] `pick_verified`: wrist camera checks before and after; blue cube picked three times on the real arm
 - [x] `scripts/cameras_ready.sh`
 - [x] Docs: FEATURES, DECISIONS, INTERFACE, this plan
+- [x] Web UI camera panel: switch between all cameras; live layers for objects, tags, robot frame, arm, tool results
 - [x] A blocked move is tried once more, slower (`blocked_retry_speed` in `workspace/robot_config/motion.json`,
       default 0.5); tests in `workspace/tests`. Not yet seen on the real arm
 
