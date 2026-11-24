@@ -17,6 +17,13 @@ the NormaCore ElRobot arm. On the second day we added an SO-101 arm to the same 
 | Interface to the robot | joint commands only |
 | Chat | text and voice, in English, German and French |
 
+**Inspired by [RoboHarness V2](https://github.com/BinceQu/RoboHarness/tree/main/harness/v2).** We took its
+central idea: the workspace is the harness. The robot takes joint commands only, and the agent works with
+tools that it can read and change. Our workspace also follows the layout of its ARX_X5 workspace: one file
+for each tool, `robot_config/`, `perception/`, skills, frozen camera images and a call history. We did not
+copy its code. That code is for a different arm (the ARX X5, two arms with six joints) and for a simulator
+evaluator. All the code in this repository is written for the ElRobot and the SO-101 on real hardware.
+
 ## Contents
 
 1. [The idea](#the-idea)
@@ -466,6 +473,7 @@ must use the same commands each time, and for corrections that must stay.
 |---|---|
 | Robot arms | NormaCore ElRobot (7 joints), SO-ARM101 (5 joints), the NormaCore parallel gripper on each |
 | Servos and bus | Feetech ST3215 at 7.5 V and 12 V, NormaCore Station |
+| Harness design | inspired by RoboHarness V2: the workspace is the harness, joint commands only |
 | Agents | Claude Code, Codex, pi; Claude Agent SDK for the chat and voice agent |
 | Models that we tested | Claude, an OpenAI decision model, the Dream-1 API (vision to gripper position) |
 | Kinematics | Pinocchio and Pink (inverse kinematics), DAQP (solver), URDF models of the two arms |
